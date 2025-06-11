@@ -17,35 +17,46 @@
 [7]: https://img.shields.io/discord/458244416562397184.svg?label=&logo=discord&logoColor=ffffff&color=7389D8&labelColor=6A7EC2
 [8]: https://discord.gg/yBJGv4T "PML Discord"
 
-Injects a basic mod loader into [*PULSAR: Lost Colony*][10].
+A mod loader, library, and manager for [*PULSAR: Lost Colony*][10].
 
 [10]: http://www.pulsarthegame.com/ "PULSAR: Lost Colony"
 
 ## Installation
 
-Before running ensure your Pulsar installation is a Mono build. On Steam you can change this by right clicking Pulsar: lost colony in your steam library and selecting [properties > betas > mono].
+Before attempting to mod, ensure your Pulsar installation is a Mono build. On Steam you can change this by right clicking Pulsar: lost colony in your steam library and selecting [properties > betas > mono].
 
 ![image](https://github.com/PULSAR-Modders/pulsar-mod-loader/assets/46509577/8aeca171-3cd7-4ffc-8805-77c8ce1400e7)
 
+### Choices
+- [Injector](https://github.com/PULSAR-Modders/pulsar-mod-loader/tree/master/PulsarModLoader.Injector) - Custom built injector which loads the manager and mods but is required to be ran every update.
 
+- [Adaptor](https://github.com/PULSAR-Modders/pulsar-mod-loader/tree/master/PulsarModLoader.Adaptor) - BepInEx adaptor which allows the manager and mods to be loaded through BepInEx.
 
-On Excecution PulsarModLoaderInstaller.exe will attempt to patch the Steam version of the game in after detecting Steam from it's default install location.  To patch a PULSAR installation in another location (non-Steam version, copy of client, etc), simply specify the path to `Assembly-CSharp.dll` as shown below.
+### Mod Locations
+Currently, mods are primarily found on the [Pulsar Lost Colony: Crew Matchup Server][8] (Unofficial Discord). They will be coming soon to Thunderstore however.
 
-```
-.\PulsarModLoaderInstaller.exe [Path\To\Pulsar\PULSAR_LostColony_Data\Managed\Assembly-CSharp.dll]
-```
+## Features
 
-Additionally, if the steam installation is not selected/viable an OpenFileDialogue will pop up for windows users asking for the installation location.
-
-Afterwards, add mods to the `PULSARLostColony\Mods` directory and run PULSAR normally.  `PulsarModLoaderInstaller.exe` is not needed after this.
-
-### Removal
-
-Use Steam's `Verify Integrity of Game Files` option to restore any modified files with minimal download.
-
-Non-Steam users can attempt to rename `Assembly-CSharp.dll.bak` to `Assembly-CSharp.dll`, assuming no official patches were released since it was last generated.  Otherwise, restore a clean copy from the official non-Steam download.
-
-Optionally remove `PulsarModLoader.dll` and `Assembly-CSharp.dll.bak` from `PULSARLostColony\PULSAR_LostColony_Data\Managed`, and the `Mods` directory from `PULSARLostColony`
+- [x] Method to inject mods into the game
+- [x] Indicator for modded sessions
+- [x] Mod requirement management
+- [x] Zip folder mod loading
+- [x] Utilities to create local chat commands
+- [x] Utilities to create public chat commands
+- [x] Autofill for chat commands and names
+- [x] Onscreen exception warning messages
+- [x] Mod Messages which allow mods to share data
+- [x] Keybinds
+- [x] Transpiler patch assist methods
+- [x] Subscribable events for mods to use
+- [x] Utilities to save data based on session or locally
+- [x] User Interface to interact with mods (Unloading, config etc)
+- [x] Utilities to create new components
+- [x] Utilities to create new items
+- [ ] Utilities to create new talents
+- [ ] Utilities to create new ships
+- [ ] Utilities to create new shops
+- [ ] Utilities to create new avatars/clothing
 
 ## Creating Mods
 
