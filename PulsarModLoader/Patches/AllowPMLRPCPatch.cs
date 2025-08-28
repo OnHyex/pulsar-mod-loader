@@ -36,4 +36,20 @@ namespace PulsarModLoader.Patches
             return HarmonyHelpers.PatchBySequence(instructions, targetSequence, injectedSequence, checkMode: HarmonyHelpers.CheckMode.NEVER);
         }
     }
+    //Pushes the PML rpcs into the shortcut cache for both the outgoing and ingoing RPC hashing so that instead of the strings for each rpc being sent just the index of them in these lists are sent (fixed 4 bytes instead of unkown number of bytes likely greater than 4)
+    [HarmonyPatch(typeof(PLUIMainMenu), "Start")]
+    class OptimizePMLRPCsPatch
+    {
+        static void Prefix()
+        {
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("ReceiveMessage");
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRecieveModList");
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("ServerRecieveModList");
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRequestModList");
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("RecieveMessage", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ServerRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRequestModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+        }
+    }
 }
