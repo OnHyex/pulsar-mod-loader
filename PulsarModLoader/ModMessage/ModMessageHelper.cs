@@ -1,5 +1,6 @@
 ﻿using HarmonyLib;
 using PulsarModLoader.MPModChecks;
+using PulsarModLoader.Patches;
 using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
@@ -35,7 +36,7 @@ namespace PulsarModLoader
 
         private static Dictionary<string, ModMessage> modMessageHandlers = new Dictionary<string, ModMessage>();
 
-        internal static List<string> indexableModMessageHandlers;
+        internal static List<string> indexableModMessageHandlers = new List<string>();
         /// <summary>
         /// Obsolete. Returns "NoPlayer"
         /// </summary>
@@ -69,7 +70,12 @@ namespace PulsarModLoader
             modMessageHandlers.Add("#" + publicCommands.GetIdentifier(), publicCommands);
             if (PhotonNetwork.isMasterClient)
             {
-                indexableModMessageHandlers = new List<string>(modMessageHandlers.Keys);
+                indexableModMessageHandlers.Clear();
+                indexableModMessageHandlers.AddRange(modMessageHandlers.Keys);
+            }
+            else
+            {
+                indexableModMessageHandlers.Clear();
             }
             Instance = this;
         }
@@ -131,10 +137,17 @@ namespace PulsarModLoader
             MPUserDataBlock userDataBlock = MPModCheckManager.DeserializeHashfullMPUserData(recievedData);
             Logger.Info($"recieved modlist from user with the following info:\nPMLVersion: {userDataBlock.PMLVersion}\nModlist:{MPModCheckManager.GetModListAsString(userDataBlock.ModData)}");
             MPModCheckManager.Instance.AddNetworkedPeerMods(pmi.sender, userDataBlock);
+            if (!userDataBlock.PMLVersion.Equals(GameVersion.PMLVersion))
+            {
+                ControlModRPCCache.UnRegisterRPCs();
+                indexableModMessageHandlers.Clear();
+                return;
+            }
             this.photonView.RPC("ClientRecieveIndexedModRPCs", pmi.sender, new object[]
             {
                 indexableModMessageHandlers.ToArray()
             });
+
         }
 
         /// <summary>
@@ -153,8 +166,12 @@ namespace PulsarModLoader
             }
             MPUserDataBlock userDataBlock = MPModCheckManager.DeserializeHashlessMPUserData(recievedData);
             Logger.Info($"recieved modlist from user with the following info:\nPMLVersion: {userDataBlock.PMLVersion}\nModlist:{MPModCheckManager.GetModListAsString(userDataBlock.ModData)}");
-
-
+            if (!userDataBlock.PMLVersion.Equals(GameVersion.PMLVersion))
+            {
+                ControlModRPCCache.UnRegisterRPCs();
+                indexableModMessageHandlers.Clear();
+                return;
+            }
             MPModCheckManager.Instance.AddNetworkedPeerMods(pmi.sender, userDataBlock);
 
             Events.Instance.CallClientModlistRecievedEvent(pmi.sender);
