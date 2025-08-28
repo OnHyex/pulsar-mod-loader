@@ -9,7 +9,7 @@ namespace PulsarModLoader.Patches
     {
         static bool PatchMethod(bool ShouldContinue, string MethodName)
         {
-            if (MethodName == "ReceiveMessage" || MethodName == "ClientRecieveModList" || MethodName == "ServerRecieveModList" || MethodName == "ClientRequestModList")
+            if (MethodName == "ReceiveMessage" || MethodName == "ClientRecieveModList" || MethodName == "ServerRecieveModList" || MethodName == "ClientRequestModList" || MethodName == "ClientRecieveIndexedModRPCs" || MethodName == "RecieveIndexedMessage")
             {
                 return true;
             }
@@ -46,10 +46,14 @@ namespace PulsarModLoader.Patches
             PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRecieveModList");
             PhotonNetwork.PhotonServerSettings.RpcList.Add("ServerRecieveModList");
             PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRequestModList");
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRecieveIndexedModRPCs");
+            PhotonNetwork.PhotonServerSettings.RpcList.Add("RecieveIndexedMessage");
             PhotonNetwork.networkingPeer.rpcShortcuts.Add("RecieveMessage", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
             PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
             PhotonNetwork.networkingPeer.rpcShortcuts.Add("ServerRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
             PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRequestModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRecieveIndexedModRPCs", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            PhotonNetwork.networkingPeer.rpcShortcuts.Add("RecieveIndexedMessage", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
         }
     }
 }
