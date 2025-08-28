@@ -23,9 +23,20 @@
         /// <param name="arguments"></param>
         public static void SendRPC(string harmonyIdentifier, string handlerIdentifier, PhotonPlayer player, object[] arguments)
         {
+            string fullName = harmonyIdentifier + "#" + handlerIdentifier;
+            int index = ModMessageHelper.indexableModMessageHandlers.IndexOf(fullName);
+            if (index != -1)
+            {
+                ModMessageHelper.Instance.photonView.RPC("RecieveIndexedMessage", player, new object[]
+                { 
+                    index,
+                    arguments
+                });
+                return;
+            }
             ModMessageHelper.Instance.photonView.RPC("ReceiveMessage", player, new object[]
             {
-                harmonyIdentifier + "#" + handlerIdentifier,
+                fullName,
                 arguments
             });
         }
@@ -39,9 +50,20 @@
         /// <param name="arguments"></param>
         public static void SendRPC(string harmonyIdentifier, string handlerIdentifier, PhotonTargets targets, object[] arguments)
         {
+            string fullName = harmonyIdentifier + "#" + handlerIdentifier;
+            int index = ModMessageHelper.indexableModMessageHandlers.IndexOf(fullName);
+            if (index != -1)
+            {
+                ModMessageHelper.Instance.photonView.RPC("RecieveIndexedMessage", targets, new object[]
+                {
+                    index,
+                    arguments
+                });
+                return;
+            }
             ModMessageHelper.Instance.photonView.RPC("ReceiveMessage", targets, new object[]
             {
-                harmonyIdentifier + "#" + handlerIdentifier,
+                fullName,
                 arguments
             });
         }
