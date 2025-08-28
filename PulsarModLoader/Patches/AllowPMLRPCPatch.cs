@@ -1,6 +1,7 @@
 ﻿using HarmonyLib;
 using System.Collections.Generic;
 using System.Reflection.Emit;
+using System.Reflection;
 
 namespace PulsarModLoader.Patches
 {
@@ -37,23 +38,56 @@ namespace PulsarModLoader.Patches
         }
     }
     //Pushes the PML rpcs into the shortcut cache for both the outgoing and ingoing RPC hashing so that instead of the strings for each rpc being sent just the index of them in these lists are sent (fixed 4 bytes instead of unkown number of bytes likely greater than 4)
-    [HarmonyPatch(typeof(PLUIMainMenu), "Start")]
-    class OptimizePMLRPCsPatch
+    internal class ControlModRPCCache
     {
-        static void Prefix()
+        internal ControlModRPCCache()
         {
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("ReceiveMessage");
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRecieveModList");
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("ServerRecieveModList");
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRequestModList");
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("ClientRecieveIndexedModRPCs");
-            PhotonNetwork.PhotonServerSettings.RpcList.Add("RecieveIndexedMessage");
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("RecieveMessage", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ServerRecieveModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRequestModList", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("ClientRecieveIndexedModRPCs", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
-            PhotonNetwork.networkingPeer.rpcShortcuts.Add("RecieveIndexedMessage", PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            Instance = this;
+            MethodInfo[] methods = typeof(ModMessageHelper).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
+            foreach (MethodInfo method in methods)
+            {
+                if (method.IsDefined(typeof(PunRPC), false))
+                {
+                    _PMLRPCNames.Add(method.Name);
+                }
+            }
+            _InitialListRPCSize = PhotonNetwork.PhotonServerSettings.RpcList.Count;
+        }
+        internal static ControlModRPCCache Instance;
+        private static List<string> _PMLRPCNames = new List<string>();
+        private static int _InitialListRPCSize;
+        internal static void RegisterRPCs()
+        {
+            PhotonNetwork.PhotonServerSettings.RpcList.AddRange(_PMLRPCNames);
+            foreach (string rpcName in _PMLRPCNames)
+            {
+                PhotonNetwork.networkingPeer.rpcShortcuts.Add(rpcName, PhotonNetwork.networkingPeer.rpcShortcuts.Count);
+            }
+        }
+        internal static void UnRegisterRPCs()
+        {
+            PhotonNetwork.PhotonServerSettings.RpcList.RemoveRange(_InitialListRPCSize - 1, PhotonNetwork.PhotonServerSettings.RpcList.Count - _InitialListRPCSize);
+            foreach (string rpcName in _PMLRPCNames)
+            {
+                PhotonNetwork.networkingPeer.rpcShortcuts.Remove(rpcName);
+            }
+
+        }
+        [HarmonyPatch(typeof(PLUIMainMenu), "Start")]
+        class CreateModRPCCacheManager
+        {
+            static void Postfix()
+            {
+                new ControlModRPCCache();
+                Events.Instance.ServerStartEvent += (PLServer server) =>
+                {
+                    ControlModRPCCache.RegisterRPCs();
+                };
+                Events.Instance.OnLeaveGameEvent += () =>
+                {
+                    ControlModRPCCache.UnRegisterRPCs();
+                };
+            }
         }
     }
 }
