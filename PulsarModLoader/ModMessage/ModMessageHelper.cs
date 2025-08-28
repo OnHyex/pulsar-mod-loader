@@ -3,6 +3,7 @@ using PulsarModLoader.MPModChecks;
 using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Reflection;
 
 namespace PulsarModLoader
@@ -34,6 +35,7 @@ namespace PulsarModLoader
 
         private static Dictionary<string, ModMessage> modMessageHandlers = new Dictionary<string, ModMessage>();
 
+        internal static List<string> indexableModMessageHandlers;
         /// <summary>
         /// Obsolete. Returns "NoPlayer"
         /// </summary>
@@ -65,6 +67,10 @@ namespace PulsarModLoader
             }
             ModMessage publicCommands = new Chat.Extensions.HandlePublicCommands();
             modMessageHandlers.Add("#" + publicCommands.GetIdentifier(), publicCommands);
+            if (PhotonNetwork.isMasterClient)
+            {
+                indexableModMessageHandlers = new List<string>(modMessageHandlers.Keys);
+            }
             Instance = this;
         }
 
@@ -125,6 +131,10 @@ namespace PulsarModLoader
             MPUserDataBlock userDataBlock = MPModCheckManager.DeserializeHashfullMPUserData(recievedData);
             Logger.Info($"recieved modlist from user with the following info:\nPMLVersion: {userDataBlock.PMLVersion}\nModlist:{MPModCheckManager.GetModListAsString(userDataBlock.ModData)}");
             MPModCheckManager.Instance.AddNetworkedPeerMods(pmi.sender, userDataBlock);
+            this.photonView.RPC("ClientRecieveIndexedModRPCs", pmi.sender, new object[]
+            {
+                indexableModMessageHandlers.ToArray()
+            });
         }
 
         /// <summary>
@@ -148,6 +158,39 @@ namespace PulsarModLoader
             MPModCheckManager.Instance.AddNetworkedPeerMods(pmi.sender, userDataBlock);
 
             Events.Instance.CallClientModlistRecievedEvent(pmi.sender);
+        }
+
+        /// <summary>
+        /// Recieves the order of mod rpcs so client and host are synced for sending/recieving indexed versions of RecieveMessage
+        /// </summary>
+        /// <param name="modRPCNames"></param>
+        /// <param name="pmi"></param>
+        [PunRPC]
+        public void ClientRecieveIndexedModRPCs(string[] modRPCNames, PhotonMessageInfo pmi)
+        {
+            if (!pmi.sender.IsMasterClient)
+            {
+                return;
+            }
+            indexableModMessageHandlers = modRPCNames.ToList<string>();
+        }
+        /// <summary>
+        /// Recieves the index of mod a message instead of the whole string modifier to reduce network load
+        /// </summary>
+        /// <param name="index"></param>
+        /// <param name="arguments"></param>
+        /// <param name="pmi"></param>
+        [PunRPC]
+        public void RecieveIndexedMessage(int index, object[] arguments, PhotonMessageInfo pmi)
+        {
+            if (index >= 0 && index < indexableModMessageHandlers.Count)
+            {
+                this.ReceiveMessage(indexableModMessageHandlers[index], arguments, pmi);
+            }
+            else
+            {
+                Utilities.Logger.Info($"Index is not valid for indexed mod message");
+            }
         }
 
         /// <summary>
