@@ -28,7 +28,7 @@
             if (index != -1)
             {
                 ModMessageHelper.Instance.photonView.RPC("RecieveIndexedMessage", player, new object[]
-                { 
+                {
                     index,
                     arguments
                 });

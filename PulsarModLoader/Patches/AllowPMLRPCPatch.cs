@@ -38,6 +38,8 @@ namespace PulsarModLoader.Patches
         }
     }
     //Pushes the PML rpcs into the shortcut cache for both the outgoing and ingoing RPC hashing so that instead of the strings for each rpc being sent just the index of them in these lists are sent (fixed 4 bytes instead of unkown number of bytes likely greater than 4)
+    //PhotonNetwork.PhotonServerSettings.RpcList is the cache for recieving RPCs
+    //PhotonNetwork.networkingpeer.rpcShortcuts is the cache for sending RPCs
     internal class ControlModRPCCache
     {
         internal ControlModRPCCache()
@@ -46,16 +48,24 @@ namespace PulsarModLoader.Patches
             MethodInfo[] methods = typeof(ModMessageHelper).GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic);
             foreach (MethodInfo method in methods)
             {
-                if (method.IsDefined(typeof(PunRPC), false))
+                if (method.IsDefined(typeof(PunRPC), false) && !excludedRPCs.Contains(method.Name))
                 {
                     _PMLRPCNames.Add(method.Name);
                 }
             }
-            _InitialListRPCSize = PhotonNetwork.PhotonServerSettings.RpcList.Count;
+            Events.Instance.ServerStartEvent += (PLServer server) =>
+            {
+                ControlModRPCCache.RegisterRPCs();
+            };
+            Events.Instance.OnLeaveGameEvent += () =>
+            {
+                ControlModRPCCache.UnRegisterRPCs();
+            };
         }
+        //Excluding these methods from cache achieves compatibility with older PML as mod list syncing will still properly occur and the host / client will be able to fully turn off the optimizations properly after recieving data from the outdated client
+        private readonly List<string> excludedRPCs = new List<string>() { "RecieveMessage", "ClientRecieveModList", "ServerRecieveModList", "ReceiveMessage" };
         internal static ControlModRPCCache Instance;
         private static List<string> _PMLRPCNames = new List<string>();
-        private static int _InitialListRPCSize;
         internal static void RegisterRPCs()
         {
             PhotonNetwork.PhotonServerSettings.RpcList.AddRange(_PMLRPCNames);
@@ -66,9 +76,9 @@ namespace PulsarModLoader.Patches
         }
         internal static void UnRegisterRPCs()
         {
-            PhotonNetwork.PhotonServerSettings.RpcList.RemoveRange(_InitialListRPCSize - 1, PhotonNetwork.PhotonServerSettings.RpcList.Count - _InitialListRPCSize);
             foreach (string rpcName in _PMLRPCNames)
             {
+                PhotonNetwork.PhotonServerSettings.RpcList.Remove(rpcName);
                 PhotonNetwork.networkingPeer.rpcShortcuts.Remove(rpcName);
             }
 
@@ -79,14 +89,6 @@ namespace PulsarModLoader.Patches
             static void Postfix()
             {
                 new ControlModRPCCache();
-                Events.Instance.ServerStartEvent += (PLServer server) =>
-                {
-                    ControlModRPCCache.RegisterRPCs();
-                };
-                Events.Instance.OnLeaveGameEvent += () =>
-                {
-                    ControlModRPCCache.UnRegisterRPCs();
-                };
             }
         }
     }
