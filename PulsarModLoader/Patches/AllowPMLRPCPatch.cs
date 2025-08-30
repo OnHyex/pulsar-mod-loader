@@ -63,7 +63,7 @@ namespace PulsarModLoader.Patches
             };
         }
         //Excluding these methods from cache achieves compatibility with older PML as mod list syncing will still properly occur and the host / client will be able to fully turn off the optimizations properly after recieving data from the outdated client
-        private readonly List<string> excludedRPCs = new List<string>() { "RecieveMessage", "ClientRecieveModList", "ServerRecieveModList", "ReceiveMessage" };
+        private static readonly List<string> excludedRPCs = new List<string>() { "ClientRecieveModList", "ServerRecieveModList" };
         internal static ControlModRPCCache Instance;
         private static List<string> _PMLRPCNames = new List<string>();
         internal static void RegisterRPCs()
