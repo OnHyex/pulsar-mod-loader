@@ -170,7 +170,6 @@ namespace PulsarModLoader
             {
                 ControlModRPCCache.UnRegisterRPCs();
                 indexableModMessageHandlers.Clear();
-                return;
             }
             MPModCheckManager.Instance.AddNetworkedPeerMods(pmi.sender, userDataBlock);
 
