@@ -3,12 +3,14 @@ using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 using UnityEngine;
 using Logger = PulsarModLoader.Utilities.Logger;
 
 namespace PulsarModLoader.Content.Components.Shield
 {
-    public class ShieldModManager
+#warning "not complete inheritance done and CreateShield should be reviewed / maybe override the base constructor stuff then decide on constructor pattern"
+    public class ShieldModManager : ComponentModManager<PLShieldGenerator,ShieldMod,EShieldGeneratorType>
     {
         public readonly int VanillaShieldMaxType = 0;
         private static ShieldModManager m_instance = null;
@@ -24,49 +26,38 @@ namespace PulsarModLoader.Content.Components.Shield
                 return m_instance;
             }
         }
-
-        ShieldModManager()
-        {
-            VanillaShieldMaxType = Enum.GetValues(typeof(EShieldGeneratorType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaShieldMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type ShieldMod = typeof(ShieldMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (ShieldMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading Shield from assembly");
-                        ShieldMod ShieldModHandler = (ShieldMod)Activator.CreateInstance(t);
-                        if (GetShieldIDFromName(ShieldModHandler.Name) == -1)
-                        {
-                            ShieldTypes.Add(ShieldModHandler);
-                            Logger.Info($"Added Shield: '{ShieldModHandler.Name}' with ID '{GetShieldIDFromName(ShieldModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add Shield from {mod.Name} with the duplicate name of '{ShieldModHandler.Name}'");
-                        }
-                    }
-                }
-            }
-        }
         /// <summary>
         /// Finds Shield type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find Shield.
         /// </summary>
         /// <param name="ShieldName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetShieldIDFromName(string ShieldName)
+        public int GetShieldIDFromName(string ShieldName) => GetIDFromName(ShieldName);
+        protected override void ComponentModConstructor(PLShieldGenerator comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < ShieldTypes.Count; i++)
+            ShieldMod shield = legacyComp as ShieldMod;
+            base.ComponentModConstructor(comp, shield, subType, level, subTypeData);
+            comp.Max = shield.ShieldMax;
+            comp.ChargeRateMax = shield.ChargeRateMax;
+            comp.RecoveryRate = shield.RecoveryRate;
+            comp.Deflection = shield.Deflection;
+            comp.MinIntegrityPercentForQuantumShield = shield.MinIntegrityPercentForQuantumShield;
+            comp.m_MaxPowerUsage_Watts = shield.MaxPowerUsage_Watts * 1.4f;
+            comp.MinIntegrityAfterDamage = shield.MinIntegrityAfterDamage;
+            if (comp.MinIntegrityAfterDamage == -1)
             {
-                if (ShieldTypes[i].Name == ShieldName)
-                {
-                    return i + VanillaShieldMaxType;
-                }
+                comp.MinIntegrityAfterDamage = Mathf.RoundToInt(comp.Max * 0.15f);
             }
-            return -1;
+            comp.MinIntegrityAfterDamage = Mathf.RoundToInt(comp.MinIntegrityAfterDamage * (1f - Mathf.Clamp(0.05f * comp.Level, 0f, 0.8f)));
+            comp.CurrentMax = comp.Max;
+            comp.Current = comp.Max;
+        }
+        static ConstructorInfo constructor = typeof(PLShieldGenerator).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EShieldGeneratorType), typeof(int) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Call, constructor);
         }
         public static PLShieldGenerator CreateShield(int Subtype, int level)
         {
