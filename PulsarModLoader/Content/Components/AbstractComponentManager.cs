@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using HarmonyLib;
 using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
@@ -21,7 +22,7 @@ namespace PulsarModLoader.Content.Components
                 var argTypes = new[] { arg1.GetType(), arg2.GetType(), arg3.GetType() };
 
                 // Find the public constructor
-                constructor = specificComponentType.GetConstructor(argTypes);
+                constructor = specificComponentType.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, argTypes, null);
 
                 if (constructor == null)
                 {
@@ -41,13 +42,14 @@ namespace PulsarModLoader.Content.Components
     }
     public abstract class ComponentModManager<TComp> where TComp : PLShipComponent
     {
-        public readonly int VanillaMaxType = 0;
-        private readonly int _MainType = 0;
+        protected readonly int VanillaMaxType = 0;
+        protected readonly int _SlotType = 0;
         protected readonly Dictionary<PulsarMod, List<Type>> componentsByMod = new Dictionary<PulsarMod, List<Type>>();
-        protected readonly List<Type> components = new List<Type>(32);
-        protected internal ComponentModManager(int MainType)
+        protected readonly List<Type> components = new List<Type>(64);
+
+        protected internal ComponentModManager(int SlotType)
         {
-            _MainType = MainType;
+            _SlotType = SlotType;
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
                 Assembly asm = mod.GetType().Assembly;
@@ -63,17 +65,19 @@ namespace PulsarModLoader.Content.Components
                         {
                             componentsByMod[mod] = new List<Type>() { t };
                         }
+                        components.Add(t);
                     }
                 }
             }
         }
-        protected internal ComponentModManager(int MainType, int MaxType) : this(MainType)
+        protected internal ComponentModManager(int SlotType, int MaxType) : this(SlotType)
         {
             VanillaMaxType = MaxType;
         }
         protected readonly ComponentReflectionConstructor<TComp> constructorFactory = new ComponentReflectionConstructor<TComp>();
-        protected virtual TComp? CreateComponent(Type compType, int SubType, int Level, int SubTypeData)
+        public virtual TComp? CreateComponent(int SubType, int Level, int SubTypeData)
         {
+            Type compType = components[SubType];
             try
             {
                 return constructorFactory.CreateWithThreeArgsExplicit(compType, SubType, Level, (short)SubTypeData);
@@ -81,8 +85,8 @@ namespace PulsarModLoader.Content.Components
             catch (Exception ex)
             {
                 Logger.Info($"Failed to create modded component {compType.Name}, {ex}");
-                return (TComp)PLShipComponent.CreateShipComponentFromHash((int)PLShipComponent.createHashFromInfo(this._MainType, this.VanillaMaxType, Level, SubTypeData, (int)ESlotType.E_COMP_CARGO));
             }
+            return null;
         }
         protected virtual void HandleModUnLoaded(PulsarMod? mod)
         {
@@ -99,7 +103,7 @@ namespace PulsarModLoader.Content.Components
                 }
             }
         }
-        public int GetIDFromName(string name)
+        public virtual int GetIDFromName(string name)
         {
             for (int i = 0; i < components.Count; i++)
             {
@@ -110,11 +114,12 @@ namespace PulsarModLoader.Content.Components
             }
             return -1;
         }
-        public int GetIDFromType(Type type)
+
+        public virtual int GetIDFromType(Type type)
         {
             for (int i = 0; i < components.Count; i++)
             {
-                if (components[i].GetType() == type || (components[i] is ILegacyComponent legacy && legacy.GetLegacyType() == type))
+                if (components[i] == type)
                 {
                     return i + VanillaMaxType;
                 }
@@ -132,7 +137,7 @@ namespace PulsarModLoader.Content.Components
     }
     public abstract class ComponentModManager<TComp,TEnum> : ComponentModManager<TComp> where TComp : PLShipComponent where TEnum : Enum
     {
-        protected ComponentModManager() : base (Enum.GetValues(typeof(TEnum)).Length)
+        protected ComponentModManager(int SlotType) : base (SlotType, Enum.GetValues(typeof(TEnum)).Length)
         {
             Logger.Info($"{typeof(TComp).Name} MaxTypeint: {VanillaMaxType - 1}");
         }
@@ -141,11 +146,11 @@ namespace PulsarModLoader.Content.Components
     {
         protected readonly LegacyComponentCompatabilityFactory<TComp, TLegacyModComp> legacyComponentFactory;
 
-        protected ComponentModManager() : base (Enum.GetValues(typeof(TEnum)).Length)
+        protected ComponentModManager(int SlotType) : base (SlotType, Enum.GetValues(typeof(TEnum)).Length)
         {
             Logger.Info($"{typeof(TComp).Name} MaxTypeint: {VanillaMaxType - 1}");
 
-            legacyComponentFactory = new LegacyComponentCompatabilityFactory<TComp, TLegacyModComp>(typeof(TEnum), (ILGenerator il) => { BaseClassConstructor(il); }, (TypeBuilder builder, FieldBuilder field) => { ModComponentSubtypeMethods(builder, field); });
+            legacyComponentFactory = new LegacyComponentCompatabilityFactory<TComp, TLegacyModComp>(typeof(TEnum), (ILGenerator il) => { BaseClassConstructor(il); }, (Dictionary<MethodInfo, MethodInfo> dictionary) => { ModComponentSubtypeMethods(dictionary); });
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
                 Assembly asm = mod.GetType().Assembly;
@@ -168,6 +173,8 @@ namespace PulsarModLoader.Content.Components
                                 {
                                     componentsByMod[mod] = new List<Type>() { generatedType };
                                 }
+                                components.Add(generatedType);
+                                legacyCompLookup.Add(generatedType, handler);
                             }
                             catch (Exception ex)
                             {
@@ -183,6 +190,7 @@ namespace PulsarModLoader.Content.Components
                     }
                 }
             }
+            UpdateLegacyModComps();
         }
         protected virtual void ComponentModConstructor(TComp comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
@@ -198,10 +206,10 @@ namespace PulsarModLoader.Content.Components
             comp.m_IconTexture = legacyComp.IconTexture;
         }
         protected abstract void BaseClassConstructor(ILGenerator il);
-        protected abstract void ModComponentSubtypeMethods(TypeBuilder builder, FieldBuilder legacyField);
-        protected override TComp? CreateComponent(Type compType, int SubType, int Level, int SubTypeData)
+        protected abstract void ModComponentSubtypeMethods(Dictionary<MethodInfo,MethodInfo> methodOverrides);
+        public override TComp? CreateComponent(int SubType, int Level, int SubTypeData)
         {
-            TComp? comp = base.CreateComponent(compType, SubType, Level, SubTypeData);
+            TComp? comp = base.CreateComponent(SubType, Level, SubTypeData);
             if (comp is ILegacyComponent LegacyComp)
             {
                 ComponentModConstructor(comp, LegacyComp.GetComponentMod(), SubType, Level, (short)SubTypeData);
@@ -209,22 +217,53 @@ namespace PulsarModLoader.Content.Components
             return comp;
         }
         public readonly List<TLegacyModComp?> legacyModComps = new List<TLegacyModComp?>();
+        private readonly Dictionary<Type, TLegacyModComp> legacyCompLookup = new Dictionary<Type, TLegacyModComp>();
         protected override void HandleModUnLoaded(PulsarMod? mod)
         {
             base.HandleModUnLoaded(mod);
+            UpdateLegacyModComps();
+        }
+        private void UpdateLegacyModComps()
+        {
             legacyModComps.Clear();
+            legacyCompLookup.Clear();
             foreach (var type in components)
             {
                 if (typeof(ILegacyComponent).IsAssignableFrom(type))
                 {
                     FieldInfo legacyField = type.GetField("_legacy", BindingFlags.Static | BindingFlags.NonPublic);
-                    legacyModComps.Add((TLegacyModComp)legacyField.GetValue(null));
+                    TLegacyModComp comp = (TLegacyModComp)legacyField.GetValue(null);
+                    legacyModComps.Add(comp);
+                    legacyCompLookup.Add(type, comp);
                 }
                 else
                 {
                     legacyModComps.Add(null);
                 }
             }
+        }
+        
+        public override int GetIDFromName(string name)
+        {
+            for (int i = 0; i < components.Count; i++)
+            {
+                if (components[i].Name == name || (legacyCompLookup.TryGetValue(components[i], out TLegacyModComp legacy) && legacy.Name == name))
+                {
+                    return i + VanillaMaxType;
+                }
+            }
+            return -1;
+        }
+        public override int GetIDFromType(Type type)
+        {
+            for (int i = 0; i < components.Count; i++)
+            {
+                if (components[i] == type || (legacyCompLookup.TryGetValue(components[i], out TLegacyModComp legacy) && legacy.GetType() == type))
+                {
+                    return i + VanillaMaxType;
+                }
+            }
+            return -1;
         }
     }
     public interface ILegacyComponent

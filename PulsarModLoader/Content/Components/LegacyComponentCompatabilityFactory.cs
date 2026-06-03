@@ -1,4 +1,5 @@
 ﻿#nullable enable
+using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -7,6 +8,7 @@ using System.Reflection;
 using System.Reflection.Emit;
 using System.Text;
 using System.Threading.Tasks;
+using static AkMIDIEvent;
 
 namespace PulsarModLoader.Content.Components
 {
@@ -15,72 +17,70 @@ namespace PulsarModLoader.Content.Components
         
 
         private readonly Action<ILGenerator> componentBaseConstructorBuilder;
-        private readonly Action<TypeBuilder,FieldBuilder> nonComponentBaseMethodAddition;
-        private readonly AssemblyBuilder asm;
-        private readonly ModuleBuilder module;
+        private static readonly AssemblyBuilder asm = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("LegacyComponentCompatabilityDynamicAssembly"), AssemblyBuilderAccess.Run);
+        private static readonly ModuleBuilder module = asm.DefineDynamicModule("MainModule");
         private readonly Type? baseEnumType;
-        public LegacyComponentCompatabilityFactory(Type? Enum, Action<ILGenerator> componentBaseConstructorBuilder, Action<TypeBuilder, FieldBuilder> nonComponentBaseMethodAddition)
+        private readonly Dictionary<MethodInfo, MethodInfo> methodOverrides;
+        public LegacyComponentCompatabilityFactory(Type? Enum, Action<ILGenerator> componentBaseConstructorBuilder, Action<Dictionary<MethodInfo, MethodInfo>> nonComponentBaseMethods)
         {
             this.componentBaseConstructorBuilder = componentBaseConstructorBuilder;
-            this.nonComponentBaseMethodAddition = nonComponentBaseMethodAddition;
-            this.baseEnumType = Enum;
 
-            var asmName = new AssemblyName($"{typeof(TComp).Name}" + "DynamicAssembly");
-
-            asm = AssemblyBuilder.DefineDynamicAssembly(asmName, AssemblyBuilderAccess.Run);
-
-            module = asm.DefineDynamicModule("MainModule");
-        }
-        private static readonly ReadOnlyDictionary<MethodInfo, MethodInfo> componentModBaseMethodOverrides;
-        private static readonly MethodInfo objectGetType;
-    
-        static LegacyComponentCompatabilityFactory()
-        {
-            objectGetType = typeof(object).GetMethod(nameof(GetType));
-            componentModBaseMethodOverrides = new ReadOnlyDictionary<MethodInfo, MethodInfo>(new Dictionary<MethodInfo, MethodInfo>()
+            methodOverrides = new Dictionary<MethodInfo, MethodInfo>()
                 {
                     {
                     // Forward Legacy AddStats to PLShipStats.AddStats()
-                        typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.AddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.AddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.addStats,
+                        LowestLevelBaseShipComponentMethods.addStats
                     },
                     {
                     // Forward Legacy FinalLateAddStats to PLShipStats.FinalLateAddStats()
-                        typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.FinalLateAddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.FinalLateAddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.finalLateAddStats,
+                        LowestLevelBaseShipComponentMethods.finalLateAddStats
                     },
                     {
                     // Forward Legacy LateAddStats to PLShipStats.LateAddStats()
-                        typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.LateAddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.LateAddStats), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.lateAddStats,
+                        LowestLevelBaseShipComponentMethods.lateAddStats
                     },
                     {
                     // Forward Legacy GetStatLineRight to PLWare.GetStatLineRight()
-                        typeof(PLShipComponent).GetMethod(nameof(PLWare.GetStatLineRight), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.GetStatLineRight), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.getStatLineRight,
+                        LowestLevelBaseShipComponentMethods.getStatLineRight
                     },
                     {
                     // Forward Legacy GetStatLineLeft to PLWare.GetStatLineLeft()
-                        typeof(PLShipComponent).GetMethod(nameof(PLWare.GetStatLineLeft), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.GetStatLineLeft), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.getStatLineLeft,
+                        LowestLevelBaseShipComponentMethods.getStatLineLeft
                     },
                     {
                     // Forward Legacy OnWarp to PLShipComponent.OnWarp()
-                        typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.OnWarp), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.OnWarp), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.onWarp,
+                        LowestLevelBaseShipComponentMethods.onWarp
                     },
                     {
                     // Forward Legacy Tick to PLShipComponent.Tick()
-                        typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.Tick), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly),
-                        typeof(ComponentModBase).GetMethod(nameof(ComponentModBase.Tick), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
+                        ComponentModMethods.tick,
+                        LowestLevelBaseShipComponentMethods.tick
                     }
-                }
-                );
-        }
+                };
 
+            //Finds the top level overriden version of each method or defaults to the provided ones
+            foreach (MethodInfo modMethod in methodOverrides.Keys.ToArray())
+            {
+                MethodInfo? method = GetClosestParentMethod(typeof(TComp), methodOverrides[modMethod].Name);
+                if (method is not null)
+                {
+                    methodOverrides[modMethod] = method;
+                }
+            }
+
+            //Adds / Overwrites methods in the methodOverrides dictionary for that specific legacy component type to map to the most recent override for whatever subclass is being used
+            nonComponentBaseMethods(methodOverrides);
+        }
+        private static readonly MethodInfo objectGetType = typeof(object).GetMethod(nameof(GetType));
         public Type DefineNewType(TLegacyComp legacy)
         {
-            TypeBuilder typeBuilder = module.DefineType(typeof(TLegacyComp).Name + "_Compat", TypeAttributes.Public | TypeAttributes.Class, typeof(TComp));
+            TypeBuilder typeBuilder = module.DefineType(legacy.GetType().Name + "_Compat", TypeAttributes.Public | TypeAttributes.Class, typeof(TComp));
 
             // static field for storing the legacy ComponentModBase Instance
             FieldBuilder legacyField = typeBuilder.DefineField(
@@ -115,25 +115,23 @@ namespace PulsarModLoader.Content.Components
             typeBuilder.DefineMethodOverride(methodBuilder, typeof(ILegacyComponent).GetMethod(nameof(ILegacyComponent.GetComponentMod)));
 
             // Forward ComponentModBaseMethods to base virtual methods of PLShipComponent / PLWare
-            foreach (var kvp in componentModBaseMethodOverrides)
+            foreach (var kvp in methodOverrides)
             {
-                DefineMethodForwarder(
+                DefineMethodForwarder
+                    (
                     typeBuilder,
                     legacyField,
-                    kvp.Key,
-                    kvp.Value
+                    kvp.Value,
+                    kvp.Key
                     );
             }
 
-            //DefineMethodForwarders for methods not present in the base ComponentModBase class
-            nonComponentBaseMethodAddition(typeBuilder, legacyField);
-
             Type generatedType = typeBuilder.CreateType();
 
-            generatedType.GetField("_legacy").SetValue(null, legacy);
+            generatedType.GetField("_legacy", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, legacy);
             return generatedType;
         }
-
+        private static MethodInfo shipStats = AccessTools.PropertyGetter(typeof(PLShipComponent), nameof(PLShipComponent.ShipStats));
         public static void DefineMethodForwarder(TypeBuilder typeBuilder, FieldInfo legacyField, MethodInfo targetMethod, MethodInfo legacyMethod)
         {
             ParameterInfo[] parameters = targetMethod.GetParameters();
@@ -152,27 +150,40 @@ namespace PulsarModLoader.Content.Components
             // Load this instance
             il.Emit(OpCodes.Ldarg_0);
 
-            // Call Closest Base Method
-            MethodInfo? closestMethodInfo = GetClosestParentMethod(typeBuilder.BaseType, targetMethod.Name);
-            if (closestMethodInfo is not null)
+            for (short i = 0; i < paramTypes.Length; i++)
             {
-                il.Emit(OpCodes.Call, closestMethodInfo);
-            }
-            else
-            {
-                il.Emit(OpCodes.Call, targetMethod);
+                switch (i + 1)
+                {
+                    case 1: il.Emit(OpCodes.Ldarg_1); break;
+                    case 2: il.Emit(OpCodes.Ldarg_2); break;
+                    case 3: il.Emit(OpCodes.Ldarg_3); break;
+                    default:
+                        il.Emit(OpCodes.Ldarg_S, i + 1);
+                        break;
+                }
             }
 
+            // Call Closest Base Method
+            il.Emit(OpCodes.Call, targetMethod);
+
+            if (targetMethod.ReturnType != typeof(void))
+            {
+                il.Emit(OpCodes.Pop);
+            }
 
             // Load static legacy instance
             il.Emit(OpCodes.Ldsfld, legacyField);
 
-            // Loads this instance
-            il.Emit(OpCodes.Ldarg_0);
+
 
             // Load all parameters
             for (short i = 0; i < paramTypes.Length; i++)
             {
+                //ComponentMod AddStats and several other methods take the PLShipComponent instead of PLShipStats which is supplied by Ldarg_0
+                if (paramTypes[i] == typeof(PLShipStats))
+                {
+                    il.Emit(OpCodes.Ldarg_0);
+                }
                 switch (i + 1)
                 {
                     case 1: il.Emit(OpCodes.Ldarg_1); break;
@@ -195,8 +206,7 @@ namespace PulsarModLoader.Content.Components
         }
         public static MethodInfo? GetClosestParentMethod(Type subClassType, string methodName)
         {
-            Type currentType = subClassType.BaseType;
-
+            Type currentType = subClassType;
             while (currentType != null)
             {
                 // Search for the method declared ONLY in the current base type being checked
