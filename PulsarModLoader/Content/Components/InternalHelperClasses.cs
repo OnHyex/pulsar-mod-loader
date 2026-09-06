@@ -1,11 +1,13 @@
-﻿using System;
+﻿using PulsarModLoader.Content.Components.WarpDriveProgram;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
 using System.Text;
 using System.Threading.Tasks;
+using UnityEngine;
 
-namespace PulsarModLoader.Content.Components
+namespace PulsarModLoader.Content.Components.InternalHelperClasses
 {
     internal static class ComponentModMethods
     {
@@ -26,5 +28,27 @@ namespace PulsarModLoader.Content.Components
         internal static readonly MethodInfo getStatLineLeft = typeof(PLWare).GetMethod(nameof(PLWare.GetStatLineLeft), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
         internal static readonly MethodInfo onWarp = typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.OnWarp), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
         internal static readonly MethodInfo tick = typeof(PLShipComponent).GetMethod(nameof(PLShipComponent.Tick), BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly);
+    }
+    public static class LegacyWarpDriveProgramHelperMethods
+    {
+        public static void LegacyFinalLateAddStats(WarpDriveProgramMod comp, PLWarpDriveProgram instance)
+        {
+            if (Time.time - instance.ShieldBooster_LastActivationTime < instance.ShieldBooster_ActiveTime)
+            {
+                comp.FinalLateAddStats(instance);
+            }
+        }
+        public static float LegacyGetActiveTimerAlpha(WarpDriveProgramMod comp, PLWarpDriveProgram instance)
+        {
+            return Mathf.Clamp01((Time.time - instance.ShieldBooster_LastActivationTime) / instance.ShieldBooster_ActiveTime);
+        }
+        public static void LegacyExecute(WarpDriveProgramMod comp, PLWarpDriveProgram instance)
+        {
+            if (!instance.IsVirus)
+            {
+                instance.ShieldBooster_ActiveTime = Time.time;
+                comp.Execute(instance);
+            }
+        }
     }
 }

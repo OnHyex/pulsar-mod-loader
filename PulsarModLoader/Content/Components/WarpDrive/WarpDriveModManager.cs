@@ -1,13 +1,15 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Content.Components.Virus;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.WarpDrive
 {
-    public class WarpDriveModManager
+    public class WarpDriveModManager : LegacyComponentModManager<PLWarpDrive, WarpDriveMod, EWarpDriveType>
     {
         public readonly int VanillaWarpDriveMaxType = 0;
         private static WarpDriveModManager m_instance = null;
@@ -24,82 +26,48 @@ namespace PulsarModLoader.Content.Components.WarpDrive
             }
         }
 
-        WarpDriveModManager()
+        WarpDriveModManager() : base((int)ESlotType.E_COMP_WARP)
         {
-            VanillaWarpDriveMaxType = Enum.GetValues(typeof(EWarpDriveType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaWarpDriveMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type WarpDriveMod = typeof(WarpDriveMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (WarpDriveMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading WarpDrive from assembly");
-                        WarpDriveMod WarpDriveModHandler = (WarpDriveMod)Activator.CreateInstance(t);
-                        if (GetWarpDriveIDFromName(WarpDriveModHandler.Name) == -1)
-                        {
-                            WarpDriveTypes.Add(WarpDriveModHandler);
-                            Logger.Info($"Added WarpDrive: '{WarpDriveModHandler.Name}' with ID '{GetWarpDriveIDFromName(WarpDriveModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add WarpDrive from {mod.Name} with the duplicate name of '{WarpDriveModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaWarpDriveMaxType = VanillaMaxType;
+            WarpDriveTypes = legacyModComps;
         }
         /// <summary>
         /// Finds WarpDrive type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find WarpDrive.
         /// </summary>
         /// <param name="WarpDriveName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetWarpDriveIDFromName(string WarpDriveName)
+        public int GetWarpDriveIDFromName(string WarpDriveName) => GetIDFromName(WarpDriveName);
+        protected override void ComponentModConstructor(PLWarpDrive comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < WarpDriveTypes.Count; i++)
-            {
-                if (WarpDriveTypes[i].Name == WarpDriveName)
-                {
-                    return i + VanillaWarpDriveMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            WarpDriveMod drive = legacyComp as WarpDriveMod;
+            comp.ChargeSpeed = drive.ChargeSpeed;
+            comp.WarpRange = drive.WarpRange;
+            comp.EnergySignatureAmt = drive.EnergySignature;
+            comp.NumberOfChargingNodes = drive.NumberOfChargesPerFuel;
+            comp.m_MaxPowerUsage_Watts = drive.MaxPowerUsage_Watts;
+        }
+        static ConstructorInfo constructor = typeof(PLWarpDrive).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EWarpDriveType), typeof(int), typeof(short) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLWarpDrive CreateWarpDrive(int Subtype, int level, short SubTypeData)
         {
-            PLWarpDrive InWarpDrive;
-            if (Subtype >= Instance.VanillaWarpDriveMaxType)
+            if (Instance.TryCreateComponent(Subtype, level, SubTypeData, out PLWarpDrive comp))
             {
-                InWarpDrive = new PLWarpDrive(EWarpDriveType.E_MAX, level, SubTypeData);
-                int subtypeformodded = Subtype - Instance.VanillaWarpDriveMaxType;
-                if (subtypeformodded <= Instance.WarpDriveTypes.Count && subtypeformodded > -1)
-                {
-                    WarpDriveMod WarpDriveType = Instance.WarpDriveTypes[Subtype - Instance.VanillaWarpDriveMaxType];
-                    InWarpDrive.SubType = Subtype;
-                    InWarpDrive.Name = WarpDriveType.Name;
-                    InWarpDrive.Desc = WarpDriveType.Description;
-                    InWarpDrive.m_IconTexture = WarpDriveType.IconTexture;
-                    InWarpDrive.ChargeSpeed = WarpDriveType.ChargeSpeed;
-                    InWarpDrive.WarpRange = WarpDriveType.WarpRange;
-                    InWarpDrive.EnergySignatureAmt = WarpDriveType.EnergySignature;
-                    InWarpDrive.NumberOfChargingNodes = WarpDriveType.NumberOfChargesPerFuel;
-                    InWarpDrive.m_MaxPowerUsage_Watts = WarpDriveType.MaxPowerUsage_Watts;
-                    InWarpDrive.m_MarketPrice = WarpDriveType.MarketPrice;
-                    InWarpDrive.CargoVisualPrefabID = WarpDriveType.CargoVisualID;
-                    InWarpDrive.CanBeDroppedOnShipDeath = WarpDriveType.CanBeDroppedOnShipDeath;
-                    InWarpDrive.Experimental = WarpDriveType.Experimental;
-                    InWarpDrive.Unstable = WarpDriveType.Unstable;
-                    InWarpDrive.Contraband = WarpDriveType.Contraband;
-                    InWarpDrive.Price_LevelMultiplierExponent = WarpDriveType.Price_LevelMultiplierExponent;
-                }
+                return comp;
             }
-            else
-            {
-                InWarpDrive = new PLWarpDrive((EWarpDriveType)Subtype, level,SubTypeData);
-            }
-            return InWarpDrive;
+            return new PLWarpDrive((EWarpDriveType)Subtype, level, SubTypeData);
         }
     }
     //Converts hashes to WarpDrives.
@@ -110,30 +78,6 @@ namespace PulsarModLoader.Content.Components.WarpDrive
         {
             __result = WarpDriveModManager.CreateWarpDrive(inSubType, inLevel, inSubTypeData);
             return false;
-        }
-    }
-    [HarmonyPatch(typeof(PLWarpDrive), "GetStatLineLeft")]
-    class LeftDescFix
-    {
-        static void Postfix(PLWarpDrive __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - WarpDriveModManager.Instance.VanillaWarpDriveMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < WarpDriveModManager.Instance.WarpDriveTypes.Count && __instance.ShipStats != null)
-            {
-                __result = WarpDriveModManager.Instance.WarpDriveTypes[subtypeformodded].GetStatLineLeft(__instance);
-            }
-        }
-    }
-    [HarmonyPatch(typeof(PLWarpDrive), "GetStatLineRight")]
-    class RightDescFix
-    {
-        static void Postfix(PLWarpDrive __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - WarpDriveModManager.Instance.VanillaWarpDriveMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < WarpDriveModManager.Instance.WarpDriveTypes.Count && __instance.ShipStats != null)
-            {
-                __result = WarpDriveModManager.Instance.WarpDriveTypes[subtypeformodded].GetStatLineRight(__instance);
-            }
         }
     }
 }

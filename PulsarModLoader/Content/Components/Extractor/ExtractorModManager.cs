@@ -4,10 +4,11 @@ using System;
 using System.Collections.Generic;
 using System.Reflection;
 using PulsarModLoader.Utilities;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.Extractor
 {
-    public class ExtractorModManager
+    public class ExtractorModManager : LegacyComponentModManager<PLExtractor, ExtractorMod, EExtractorType>
     {
         public readonly int VanillaExtractorMaxType = 0;
         private static ExtractorModManager m_instance = null;
@@ -24,112 +25,85 @@ namespace PulsarModLoader.Content.Components.Extractor
             }
         }
 
-        ExtractorModManager()
+        public ExtractorModManager() : base((int)ESlotType.E_COMP_SALVAGE_SYSTEM)
         {
-            VanillaExtractorMaxType = Enum.GetValues(typeof(EExtractorType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaExtractorMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type ExtractorMod = typeof(ExtractorMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (ExtractorMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading Extractor from assembly");
-                        ExtractorMod ExtractorModHandler = (ExtractorMod)Activator.CreateInstance(t);
-                        if (GetExtractorIDFromName(ExtractorModHandler.Name) == -1)
-                        {
-                            ExtractorTypes.Add(ExtractorModHandler);
-                            Logger.Info($"Added Extractor: '{ExtractorModHandler.Name}' with ID '{GetExtractorIDFromName(ExtractorModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add Extractor from {mod.Name} with the duplicate name of '{ExtractorModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaExtractorMaxType = VanillaMaxType;
+            ExtractorTypes = legacyModComps;
         }
         /// <summary>
         /// Finds Extractor type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find Extractor.
         /// </summary>
         /// <param name="ExtractorName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetExtractorIDFromName(string ExtractorName)
+        public int GetExtractorIDFromName(string ExtractorName) => GetIDFromName(ExtractorName);
+        protected override void ComponentModConstructor(PLExtractor comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < ExtractorTypes.Count; i++)
-            {
-                if (ExtractorTypes[i].Name == ExtractorName)
-                {
-                    return i + VanillaExtractorMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            ExtractorMod extractor = legacyComp as ExtractorMod;
+            comp.m_Stability = extractor.Stability;
+        }
+        static ConstructorInfo constructor = typeof(PLExtractor).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EExtractorType), typeof(int), typeof(short) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        //No Methods extra
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLExtractor CreateExtractor(int Subtype, int level)
         {
-            PLExtractor InExtractor;
-            if (Subtype >= Instance.VanillaExtractorMaxType)
+            return CreateExtractor(Subtype, level, 0);
+        }
+        public static PLExtractor CreateExtractor(int Subtype, int level, int Subtypedata)
+        {
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLExtractor comp))
             {
-                InExtractor = new PLExtractor(EExtractorType.E_MAX, level);
-                int subtypeformodded = Subtype - Instance.VanillaExtractorMaxType;
-                if (subtypeformodded <= Instance.ExtractorTypes.Count && subtypeformodded > -1)
-                {
-                    ExtractorMod ExtractorType = Instance.ExtractorTypes[Subtype - Instance.VanillaExtractorMaxType];
-                    InExtractor.SubType = Subtype;
-                    InExtractor.Name = ExtractorType.Name;
-                    InExtractor.Desc = ExtractorType.Description;
-                    InExtractor.m_IconTexture = ExtractorType.IconTexture;
-                    InExtractor.m_Stability = ExtractorType.Stability;
-                    InExtractor.m_MarketPrice = ExtractorType.MarketPrice;
-                    InExtractor.CargoVisualPrefabID = ExtractorType.CargoVisualID;
-                    InExtractor.CanBeDroppedOnShipDeath = ExtractorType.CanBeDroppedOnShipDeath;
-                    InExtractor.Experimental = ExtractorType.Experimental;
-                    InExtractor.Unstable = ExtractorType.Unstable;
-                    InExtractor.Contraband = ExtractorType.Contraband;
-                    InExtractor.Price_LevelMultiplierExponent = ExtractorType.Price_LevelMultiplierExponent;
-                }
+                return comp;
             }
-            else
-            {
-                InExtractor = new PLExtractor((EExtractorType)Subtype, level);
-            }
-            return InExtractor;
+
+            comp = new PLExtractor((EExtractorType)Subtype, level, (short)Subtypedata);
+            return comp;
         }
     }
     //Converts hashes to Extractors.
     [HarmonyPatch(typeof(PLExtractor), "CreateExtractorFromHash")]
     class ExtractorHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, short inSubTypeData, ref PLShipComponent __result)
         {
-            __result = ExtractorModManager.CreateExtractor(inSubType, inLevel);
+            __result = ExtractorModManager.CreateExtractor(inSubType, inLevel, (int)inSubTypeData);
             return false;
         }
     }
-    [HarmonyPatch(typeof(PLExtractor), "GetStatLineLeft")]
-    class LeftDescFix
-    {
-        static void Postfix(PLExtractor __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - ExtractorModManager.Instance.VanillaExtractorMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < ExtractorModManager.Instance.ExtractorTypes.Count && __instance.ShipStats != null)
-            {
-                __result = ExtractorModManager.Instance.ExtractorTypes[subtypeformodded].GetStatLineLeft(__instance);
-            }
-        }
-    }
-    [HarmonyPatch(typeof(PLExtractor), "GetStatLineRight")]
-    class RightDescFix
-    {
-        static void Postfix(PLExtractor __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - ExtractorModManager.Instance.VanillaExtractorMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < ExtractorModManager.Instance.ExtractorTypes.Count && __instance.ShipStats != null)
-            {
-                __result = ExtractorModManager.Instance.ExtractorTypes[subtypeformodded].GetStatLineRight(__instance);
-            }
-        }
-    }
+    //[HarmonyPatch(typeof(PLExtractor), "GetStatLineLeft")]
+    //class LeftDescFix
+    //{
+    //    static void Postfix(PLExtractor __instance, ref string __result)
+    //    {
+    //        int subtypeformodded = __instance.SubType - ExtractorModManager.Instance.VanillaExtractorMaxType;
+    //        if (subtypeformodded > -1 && subtypeformodded < ExtractorModManager.Instance.ExtractorTypes.Count && __instance.ShipStats != null)
+    //        {
+    //            __result = ExtractorModManager.Instance.ExtractorTypes[subtypeformodded].GetStatLineLeft(__instance);
+    //        }
+    //    }
+    //}
+    //[HarmonyPatch(typeof(PLExtractor), "GetStatLineRight")]
+    //class RightDescFix
+    //{
+    //    static void Postfix(PLExtractor __instance, ref string __result)
+    //    {
+    //        int subtypeformodded = __instance.SubType - ExtractorModManager.Instance.VanillaExtractorMaxType;
+    //        if (subtypeformodded > -1 && subtypeformodded < ExtractorModManager.Instance.ExtractorTypes.Count && __instance.ShipStats != null)
+    //        {
+    //            __result = ExtractorModManager.Instance.ExtractorTypes[subtypeformodded].GetStatLineRight(__instance);
+    //        }
+    //    }
+    //}
 }

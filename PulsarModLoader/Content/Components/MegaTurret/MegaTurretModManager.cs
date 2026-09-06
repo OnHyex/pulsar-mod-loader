@@ -1,12 +1,15 @@
 ﻿using HarmonyLib;
+using ProtoBuf.Meta;
+using PulsarModLoader.Content.Components.AutoTurret;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using static Cinemachine.DocumentationSortingAttribute;
 
 namespace PulsarModLoader.Content.Components.MegaTurret
 {
-    public class MegaTurretModManager
+    public class MegaTurretModManager : LegacyInstantiatableComponentModManager<PLTurret, MegaTurretMod>
     {
         public readonly int VanillaMegaTurretMaxType = 0;
         private static MegaTurretModManager m_instance = null;
@@ -23,65 +26,51 @@ namespace PulsarModLoader.Content.Components.MegaTurret
             }
         }
 
-        MegaTurretModManager()
+        MegaTurretModManager() : base((int)ESlotType.E_COMP_MAINTURRET, 8)
         {
-            VanillaMegaTurretMaxType = 8;
-            Logger.Info($"MaxTypeint = {VanillaMegaTurretMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
+
+        }
+        protected override string GetLegacyComponentName(MegaTurretMod comp)
+        {
+            return comp.Name;
+        }
+        protected override Type GetComponentType(MegaTurretMod comp)
+        {
+            Type type = GetConstructorTypeFromMethodBody(AccessTools.PropertyGetter(comp.GetType(), nameof(MegaTurretMod.PLMegaTurret)));
+            if (type is not null)
             {
-                Assembly asm = mod.GetType().Assembly;
-                Type MegaTurretMod = typeof(MegaTurretMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (MegaTurretMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading MegaTurret from assembly");
-                        MegaTurretMod MegaTurretModHandler = (MegaTurretMod)Activator.CreateInstance(t);
-                        if (GetMegaTurretIDFromName(MegaTurretModHandler.Name) == -1)
-                        {
-                            MegaTurretTypes.Add(MegaTurretModHandler);
-                            Logger.Info($"Added MegaTurret: '{MegaTurretModHandler.Name}' with ID '{GetMegaTurretIDFromName(MegaTurretModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add MegaTurret from {mod.Name} with the duplicate name of '{MegaTurretModHandler.Name}'");
-                        }
-                    }
-                }
+                return type;
             }
+            throw new Exception($"What is going on in {comp.Name} get component property");
+        }
+        protected override bool ValidTypeCheck<T>(Type type)
+        {
+            return base.ValidTypeCheck<T>(type) && type.GetCustomAttribute<TurretType>()?.type == EModdedTurretType.Mega;
         }
         /// <summary>
         /// Finds MegaTurret type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find MegaTurret.
         /// </summary>
         /// <param name="MegaTurretName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetMegaTurretIDFromName(string MegaTurretName)
+        public int GetMegaTurretIDFromName(string MegaTurretName) => GetIDFromName(MegaTurretName);
+        internal PLTurret CreateModdedTurret(int Subtype, int level, int Subtypedata)
         {
-            for (int i = 0; i < MegaTurretTypes.Count; i++)
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLTurret comp))
             {
-                if (MegaTurretTypes[i].Name == MegaTurretName)
-                {
-                    return i + VanillaMegaTurretMaxType;
-                }
+                return comp;
             }
-            return -1;
+            return null;
         }
     }
     //Converts hashes to MegaTurrets.
     [HarmonyPatch(typeof(PLMegaTurret), "CreateMainTurretFromHash")]
     class MegaTurretHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            int subtypeformodded = inSubType - MegaTurretModManager.Instance.VanillaMegaTurretMaxType;
-            if (subtypeformodded <= MegaTurretModManager.Instance.MegaTurretTypes.Count && subtypeformodded > -1)
-            {
-                Logger.Info("Creating MegaTurret from list info");
-                __result = MegaTurretModManager.Instance.MegaTurretTypes[subtypeformodded].PLMegaTurret;
-                __result.SubType = inSubType;
-                __result.Level = inLevel;
+            __result = MegaTurretModManager.Instance.CreateModdedTurret(inSubType, inLevel, inSubTypeData);
+            if (__result is not null)
                 return false;
-            }
             return true;
         }
     }

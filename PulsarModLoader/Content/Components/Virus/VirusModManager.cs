@@ -1,13 +1,14 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.Virus
 {
-    public class VirusModManager
+    public class VirusModManager : LegacyComponentModManager<PLVirus, VirusMod, EVirusType>
     {
         public readonly int VanillaVirusMaxType = 0;
         private static VirusModManager m_instance = null;
@@ -24,100 +25,58 @@ namespace PulsarModLoader.Content.Components.Virus
             }
         }
 
-        VirusModManager()
+        VirusModManager() : base((int)ESlotType.E_COMP_VIRUS)
         {
-            VanillaVirusMaxType = Enum.GetValues(typeof(EVirusType)).Length - 1;
-            Logger.Info($"MaxTypeint = {VanillaVirusMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type VirusMod = typeof(VirusMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (VirusMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading Virus from assembly");
-                        VirusMod VirusModHandler = (VirusMod)Activator.CreateInstance(t);
-                        if (GetVirusIDFromName(VirusModHandler.Name) == -1)
-                        {
-                            VirusTypes.Add(VirusModHandler);
-                            Logger.Info($"Added Virus: '{VirusModHandler.Name}' with ID '{GetVirusIDFromName(VirusModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add Virus from {mod.Name} with the duplicate name of '{VirusModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaVirusMaxType = VanillaMaxType;
+            VirusTypes = legacyModComps;
         }
         /// <summary>
         /// Finds Virus type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find Virus.
         /// </summary>
         /// <param name="VirusName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetVirusIDFromName(string VirusName)
+        public int GetVirusIDFromName(string VirusName) => GetIDFromName(VirusName);
+        protected override void ComponentModConstructor(PLVirus comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < VirusTypes.Count; i++)
-            {
-                if (VirusTypes[i].Name == VirusName)
-                {
-                    return i + VanillaVirusMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            VirusMod virus = legacyComp as VirusMod;
+            comp.InfectionTimeLimitMs = virus.InfectionTimeLimitMs;
+        }
+        static ConstructorInfo constructor = typeof(PLVirus).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EVirusType), typeof(int), typeof(short) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLVirus CreateVirus(int Subtype, int level)
         {
-            PLVirus InVirus;
-            if (Subtype >= Instance.VanillaVirusMaxType)
+            return CreateVirus(Subtype, level, 0);
+        }
+        public static PLVirus CreateVirus(int Subtype, int level, short inSubTypeData)
+        {
+            if (Instance.TryCreateComponent(Subtype, level, inSubTypeData, out PLVirus comp))
             {
-                InVirus = new PLVirus(EVirusType.NONE, level);
-                int subtypeformodded = Subtype - Instance.VanillaVirusMaxType;
-                if (subtypeformodded <= Instance.VirusTypes.Count && subtypeformodded > -1)
-                {
-                    VirusMod VirusType = Instance.VirusTypes[Subtype - Instance.VanillaVirusMaxType];
-                    InVirus.SubType = Subtype;
-                    InVirus.Name = VirusType.Name;
-                    InVirus.Desc = VirusType.Description;
-                    InVirus.m_IconTexture = VirusType.IconTexture;
-                    InVirus.m_MarketPrice = VirusType.MarketPrice;
-                    InVirus.CargoVisualPrefabID = VirusType.CargoVisualID;
-                    InVirus.CanBeDroppedOnShipDeath = VirusType.CanBeDroppedOnShipDeath;
-                    InVirus.Experimental = VirusType.Experimental;
-                    InVirus.Unstable = VirusType.Unstable;
-                    InVirus.Contraband = VirusType.Contraband;
-                    InVirus.InfectionTimeLimitMs = VirusType.InfectionTimeLimitMs;
-                    InVirus.Price_LevelMultiplierExponent = VirusType.Price_LevelMultiplierExponent;
-                }
+                return comp;
             }
-            else
-            {
-                InVirus = new PLVirus((EVirusType)Subtype, level);
-            }
-            return InVirus;
+            return new PLVirus((EVirusType)Subtype, level, inSubTypeData);
         }
     }
     //Converts hashes to Viruss.
     [HarmonyPatch(typeof(PLVirus), "CreateVirusFromHash")]
     class VirusHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, short inSubTypeData, ref PLShipComponent __result)
         {
-            __result = VirusModManager.CreateVirus(inSubType, inLevel);
+            __result = VirusModManager.CreateVirus(inSubType, inLevel, inSubTypeData);
             return false;
-        }
-    }
-    [HarmonyPatch(typeof(PLVirus), "FinalLateAddStats")]
-    class VirusFinalLateAddStatsPatch
-    {
-        static void Postfix(PLVirus __instance)
-        {
-            int subtypeformodded = __instance.SubType - VirusModManager.Instance.VanillaVirusMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < VirusModManager.Instance.VirusTypes.Count)
-            {
-                VirusModManager.Instance.VirusTypes[subtypeformodded].FinalLateAddStats(__instance);
-            }
         }
     }
 }

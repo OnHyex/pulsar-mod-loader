@@ -1,13 +1,15 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Content.Components.NuclearDevice;
 using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.PolytechModule
 {
-    public class PolytechModuleModManager
+    public class PolytechModuleModManager : LegacyComponentModManager<PLPolytechModule, PolytechModuleMod, EPolytechModuleType>
     {
         public readonly int VanillaPolytechModuleMaxType = 0;
         private static PolytechModuleModManager m_instance = null;
@@ -24,112 +26,81 @@ namespace PulsarModLoader.Content.Components.PolytechModule
             }
         }
 
-        PolytechModuleModManager()
+        PolytechModuleModManager() : base((int)ESlotType.E_COMP_POLYTECH_MODULE)
         {
-            VanillaPolytechModuleMaxType = Enum.GetValues(typeof(EPolytechModuleType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaPolytechModuleMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type PolytechModuleMod = typeof(PolytechModuleMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (PolytechModuleMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading PolytechModule from assembly");
-                        PolytechModuleMod PolytechModuleModHandler = (PolytechModuleMod)Activator.CreateInstance(t);
-                        if (GetPolytechModuleIDFromName(PolytechModuleModHandler.Name) == -1)
-                        {
-                            PolytechModuleTypes.Add(PolytechModuleModHandler);
-                            Logger.Info($"Added PolytechModule: '{PolytechModuleModHandler.Name}' with ID '{GetPolytechModuleIDFromName(PolytechModuleModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add PolytechModule from {mod.Name} with the duplicate name of '{PolytechModuleModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaPolytechModuleMaxType = VanillaMaxType;
+            PolytechModuleTypes = legacyModComps;
         }
         /// <summary>
         /// Finds PolytechModule type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find PolytechModule.
         /// </summary>
         /// <param name="PolytechModuleName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetPolytechModuleIDFromName(string PolytechModuleName)
+        public int GetPolytechModuleIDFromName(string PolytechModuleName) => GetIDFromName(PolytechModuleName);
+        protected override void ComponentModConstructor(PLPolytechModule comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < PolytechModuleTypes.Count; i++)
-            {
-                if (PolytechModuleTypes[i].Name == PolytechModuleName)
-                {
-                    return i + VanillaPolytechModuleMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            PolytechModuleMod polytech = legacyComp as PolytechModuleMod;
+            comp.m_MaxPowerUsage_Watts = polytech.MaxPowerUsage_Watts;
+        }
+        static ConstructorInfo constructor = typeof(PLPolytechModule).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EPolytechModuleType), typeof(int) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLPolytechModule CreatePolytechModule(int Subtype, int level)
         {
-            PLPolytechModule InPolytechModule;
-            if (Subtype >= Instance.VanillaPolytechModuleMaxType)
+            return CreatePolytechModule(Subtype, level, 0);
+        }
+        public static PLPolytechModule CreatePolytechModule(int Subtype, int level, int inSubTypeData)
+        {
+            if (Instance.TryCreateComponent(Subtype, level, inSubTypeData, out PLPolytechModule comp))
             {
-                InPolytechModule = new PLPolytechModule(EPolytechModuleType.E_MAX, level);
-                int subtypeformodded = Subtype - Instance.VanillaPolytechModuleMaxType;
-                if (subtypeformodded <= Instance.PolytechModuleTypes.Count && subtypeformodded > -1)
-                {
-                    PolytechModuleMod PolytechModuleType = Instance.PolytechModuleTypes[Subtype - Instance.VanillaPolytechModuleMaxType];
-                    InPolytechModule.SubType = Subtype;
-                    InPolytechModule.Name = PolytechModuleType.Name;
-                    InPolytechModule.Desc = PolytechModuleType.Description;
-                    InPolytechModule.m_IconTexture = PolytechModuleType.IconTexture;
-                    InPolytechModule.m_MarketPrice = PolytechModuleType.MarketPrice;
-                    InPolytechModule.CargoVisualPrefabID = PolytechModuleType.CargoVisualID;
-                    InPolytechModule.CanBeDroppedOnShipDeath = PolytechModuleType.CanBeDroppedOnShipDeath;
-                    InPolytechModule.Experimental = PolytechModuleType.Experimental;
-                    InPolytechModule.Unstable = PolytechModuleType.Unstable;
-                    InPolytechModule.Contraband = PolytechModuleType.Contraband;
-                    InPolytechModule.Price_LevelMultiplierExponent = PolytechModuleType.Price_LevelMultiplierExponent;
-                    InPolytechModule.m_MaxPowerUsage_Watts = PolytechModuleType.MaxPowerUsage_Watts;
-                }
+                return comp;
             }
-            else
-            {
-                InPolytechModule = new PLPolytechModule((EPolytechModuleType)Subtype, level);
-            }
-            return InPolytechModule;
+            return new PLPolytechModule((EPolytechModuleType)Subtype, level);
         }
     }
     //Converts hashes to PolytechModules.
     [HarmonyPatch(typeof(PLPolytechModule), "CreatePolytechModuleFromHash")]
     class HashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            __result = PolytechModuleModManager.CreatePolytechModule(inSubType, inLevel);
+            __result = PolytechModuleModManager.CreatePolytechModule(inSubType, inLevel, inSubTypeData);
             return false;
         }
     }
-    [HarmonyPatch(typeof(PLPolytechModule), "Tick")]
-    class TickPatch
-    {
-        static void Postfix(PLPolytechModule __instance)
-        {
-            int subtypeformodded = __instance.SubType - PolytechModuleModManager.Instance.VanillaPolytechModuleMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < PolytechModuleModManager.Instance.PolytechModuleTypes.Count && __instance.ShipStats != null && __instance.IsEquipped)
-            {
-                PolytechModuleModManager.Instance.PolytechModuleTypes[subtypeformodded].Tick(__instance);
-            }
-        }
-    }
-    [HarmonyPatch(typeof(PLPolytechModule), "FinalLateAddStats")]
-    class FinalLateAddStatsPatch
-    {
-        static void Postfix(PLPolytechModule __instance)
-        {
-            int subtypeformodded = __instance.SubType - PolytechModuleModManager.Instance.VanillaPolytechModuleMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < PolytechModuleModManager.Instance.PolytechModuleTypes.Count && __instance.ShipStats != null)
-            {
-                PolytechModuleModManager.Instance.PolytechModuleTypes[subtypeformodded].FinalLateAddStats(__instance);
-            }
-        }
-    }
+    //[HarmonyPatch(typeof(PLPolytechModule), "Tick")]
+    //class TickPatch
+    //{
+    //    static void Postfix(PLPolytechModule __instance)
+    //    {
+    //        int subtypeformodded = __instance.SubType - PolytechModuleModManager.Instance.VanillaPolytechModuleMaxType;
+    //        if (subtypeformodded > -1 && subtypeformodded < PolytechModuleModManager.Instance.PolytechModuleTypes.Count && __instance.ShipStats != null && __instance.IsEquipped)
+    //        {
+    //            PolytechModuleModManager.Instance.PolytechModuleTypes[subtypeformodded].Tick(__instance);
+    //        }
+    //    }
+    //}
+    //[HarmonyPatch(typeof(PLPolytechModule), "FinalLateAddStats")]
+    //class FinalLateAddStatsPatch
+    //{
+    //    static void Postfix(PLPolytechModule __instance)
+    //    {
+    //        int subtypeformodded = __instance.SubType - PolytechModuleModManager.Instance.VanillaPolytechModuleMaxType;
+    //        if (subtypeformodded > -1 && subtypeformodded < PolytechModuleModManager.Instance.PolytechModuleTypes.Count && __instance.ShipStats != null)
+    //        {
+    //            PolytechModuleModManager.Instance.PolytechModuleTypes[subtypeformodded].FinalLateAddStats(__instance);
+    //        }
+    //    }
+    //}
 }

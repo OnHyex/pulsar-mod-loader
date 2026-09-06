@@ -1,13 +1,15 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Content.Components.Thruster;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.InertiaThruster
 {
-    public class InertiaThrusterModManager
+    public class InertiaThrusterModManager : LegacyComponentModManager<PLInertiaThruster, InertiaThrusterMod, EInertiaThrusterType>
     {
         public readonly int VanillaInertiaThrusterMaxType = 0;
         private static InertiaThrusterModManager m_instance = null;
@@ -24,127 +26,58 @@ namespace PulsarModLoader.Content.Components.InertiaThruster
             }
         }
 
-        InertiaThrusterModManager()
+        InertiaThrusterModManager() : base((int)ESlotType.E_COMP_INERTIA_THRUSTER)
         {
-            VanillaInertiaThrusterMaxType = Enum.GetValues(typeof(EInertiaThrusterType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaInertiaThrusterMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type InertiaThrusterMod = typeof(InertiaThrusterMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (InertiaThrusterMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading InertiaThruster from assembly");
-                        InertiaThrusterMod InertiaThrusterModHandler = (InertiaThrusterMod)Activator.CreateInstance(t);
-                        if (GetInertiaThrusterIDFromName(InertiaThrusterModHandler.Name) == -1)
-                        {
-                            InertiaThrusterTypes.Add(InertiaThrusterModHandler);
-                            Logger.Info($"Added InertiaThruster: '{InertiaThrusterModHandler.Name}' with ID '{GetInertiaThrusterIDFromName(InertiaThrusterModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add InertiaThruster from {mod.Name} with the duplicate name of '{InertiaThrusterModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaInertiaThrusterMaxType = VanillaMaxType;
+            InertiaThrusterTypes = legacyModComps;
         }
         /// <summary>
         /// Finds InertiaThruster type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find InertiaThruster.
         /// </summary>
         /// <param name="InertiaThrusterName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetInertiaThrusterIDFromName(string InertiaThrusterName)
+        public int GetInertiaThrusterIDFromName(string InertiaThrusterName) => GetIDFromName(InertiaThrusterName);
+        protected override void ComponentModConstructor(PLInertiaThruster comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < InertiaThrusterTypes.Count; i++)
-            {
-                if (InertiaThrusterTypes[i].Name == InertiaThrusterName)
-                {
-                    return i + VanillaInertiaThrusterMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            InertiaThrusterMod thruster = legacyComp as InertiaThrusterMod;
+            comp.m_MaxOutput = thruster.MaxOutput;
+            comp.m_BaseMaxPower = thruster.MaxPowerUsage_Watts;
+        }
+        static ConstructorInfo constructor = typeof(PLInertiaThruster).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(EInertiaThrusterType), typeof(int) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLInertiaThruster CreateInertiaThruster(int Subtype, int level)
         {
-            PLInertiaThruster InInertiaThruster;
-            if (Subtype >= Instance.VanillaInertiaThrusterMaxType)
+            return CreateInertiaThruster(Subtype, level, 0);
+        }
+        public static PLInertiaThruster CreateInertiaThruster(int Subtype, int level, int inSubTypeData)
+        {
+            if (Instance.TryCreateComponent(Subtype, level, inSubTypeData, out PLInertiaThruster comp))
             {
-                InInertiaThruster = new PLInertiaThruster(EInertiaThrusterType.E_MAX, level);
-                int subtypeformodded = Subtype - Instance.VanillaInertiaThrusterMaxType;
-                if (subtypeformodded <= Instance.InertiaThrusterTypes.Count && subtypeformodded > -1)
-                {
-                    InertiaThrusterMod InertiaThrusterType = Instance.InertiaThrusterTypes[Subtype - Instance.VanillaInertiaThrusterMaxType];
-                    InInertiaThruster.SubType = Subtype;
-                    InInertiaThruster.Name = InertiaThrusterType.Name;
-                    InInertiaThruster.Desc = InertiaThrusterType.Description;
-                    InInertiaThruster.m_IconTexture = InertiaThrusterType.IconTexture;
-                    InInertiaThruster.m_MaxOutput = InertiaThrusterType.MaxOutput;
-                    InInertiaThruster.m_BaseMaxPower = InertiaThrusterType.MaxPowerUsage_Watts;
-                    InInertiaThruster.m_MarketPrice = InertiaThrusterType.MarketPrice; 
-                    InInertiaThruster.CargoVisualPrefabID = InertiaThrusterType.CargoVisualID;
-                    InInertiaThruster.CanBeDroppedOnShipDeath = InertiaThrusterType.CanBeDroppedOnShipDeath;
-                    InInertiaThruster.Experimental = InertiaThrusterType.Experimental;
-                    InInertiaThruster.Unstable = InertiaThrusterType.Unstable;
-                    InInertiaThruster.Contraband = InertiaThrusterType.Contraband;
-                    InInertiaThruster.UpdateMaxPowerWatts();
-                    InInertiaThruster.Price_LevelMultiplierExponent = InertiaThrusterType.Price_LevelMultiplierExponent;
-                }
+                return comp;
             }
-            else
-            {
-                InInertiaThruster = new PLInertiaThruster((EInertiaThrusterType)Subtype, level);
-            }
-            return InInertiaThruster;
+            return new PLInertiaThruster((EInertiaThrusterType)Subtype, level);
         }
     }
     //Converts hashes to InertiaThrusters.
     [HarmonyPatch(typeof(PLInertiaThruster), "CreateInertiaThrusterFromHash")]
     class InertiaThrusterHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            __result = InertiaThrusterModManager.CreateInertiaThruster(inSubType, inLevel);
+            __result = InertiaThrusterModManager.CreateInertiaThruster(inSubType, inLevel, inSubTypeData);
             return false;
-        }
-    }
-
-    [HarmonyPatch(typeof(PLInertiaThruster), "Tick")]
-    class TickPatch
-    {
-        static void Postfix(PLInertiaThruster __instance)
-        {
-            int subtypeformodded = __instance.SubType - InertiaThrusterModManager.Instance.VanillaInertiaThrusterMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < InertiaThrusterModManager.Instance.InertiaThrusterTypes.Count && __instance.ShipStats != null)
-            {
-                InertiaThrusterModManager.Instance.InertiaThrusterTypes[subtypeformodded].Tick(__instance);
-            }
-        }
-    }
-    [HarmonyPatch(typeof(PLInertiaThruster), "GetStatLineLeft")]
-    class LeftDescFix
-    {
-        static void Postfix(PLInertiaThruster __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - InertiaThrusterModManager.Instance.VanillaInertiaThrusterMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < InertiaThrusterModManager.Instance.InertiaThrusterTypes.Count && __instance.ShipStats != null)
-            {
-                __result = InertiaThrusterModManager.Instance.InertiaThrusterTypes[subtypeformodded].GetStatLineLeft(__instance);
-            }
-        }
-    }
-    [HarmonyPatch(typeof(PLInertiaThruster), "GetStatLineRight")]
-    class RightDescFix
-    {
-        static void Postfix(PLInertiaThruster __instance, ref string __result)
-        {
-            int subtypeformodded = __instance.SubType - InertiaThrusterModManager.Instance.VanillaInertiaThrusterMaxType;
-            if (subtypeformodded > -1 && subtypeformodded < InertiaThrusterModManager.Instance.InertiaThrusterTypes.Count && __instance.ShipStats != null)
-            {
-                __result = InertiaThrusterModManager.Instance.InertiaThrusterTypes[subtypeformodded].GetStatLineRight(__instance);
-            }
         }
     }
 }

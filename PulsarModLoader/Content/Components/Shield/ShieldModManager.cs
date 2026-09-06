@@ -10,7 +10,7 @@ using Logger = PulsarModLoader.Utilities.Logger;
 
 namespace PulsarModLoader.Content.Components.Shield
 {
-    public class ShieldModManager : ComponentModManager<PLShieldGenerator,ShieldMod,EShieldGeneratorType>
+    public class ShieldModManager : LegacyComponentModManager<PLShieldGenerator,ShieldMod,EShieldGeneratorType>
     {
         public readonly int VanillaShieldMaxType = 0;
         private static ShieldModManager m_instance = null;
@@ -39,8 +39,8 @@ namespace PulsarModLoader.Content.Components.Shield
         public int GetShieldIDFromName(string ShieldName) => GetIDFromName(ShieldName);
         protected override void ComponentModConstructor(PLShieldGenerator comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
             ShieldMod shield = legacyComp as ShieldMod;
-            base.ComponentModConstructor(comp, shield, subType, level, subTypeData);
             comp.Max = shield.ShieldMax;
             comp.ChargeRateMax = shield.ChargeRateMax;
             comp.RecoveryRate = shield.RecoveryRate;
@@ -76,17 +76,11 @@ namespace PulsarModLoader.Content.Components.Shield
         }
         public static PLShieldGenerator CreateShield(int Subtype, int level, int Subtypedata)
         {
-            PLShieldGenerator comp;
-            if (Subtype >= Instance.VanillaMaxType)
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLShieldGenerator comp))
             {
-                comp = Instance.CreateComponent(Subtype - Instance.VanillaMaxType, level, Subtypedata);
-                comp.SubType = Subtype;
+                return comp;
             }
-            else
-            {
-                comp = new PLShieldGenerator((EShieldGeneratorType)Subtype, level);
-            }
-            return comp;
+            return new PLShieldGenerator((EShieldGeneratorType)Subtype, level);
         }
     }
     //Converts hashes to Shields.

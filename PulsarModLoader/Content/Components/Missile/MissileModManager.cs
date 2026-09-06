@@ -1,13 +1,13 @@
-﻿using CodeStage.AntiCheat.ObscuredTypes;
-using HarmonyLib;
+﻿using HarmonyLib;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using System.Reflection.Emit;
+using PulsarModLoader.Content.Components.InternalHelperClasses;
 
 namespace PulsarModLoader.Content.Components.Missile
 {
-    public class MissileModManager
+    public class MissileModManager : LegacyComponentModManager<PLTrackerMissile, MissileMod, ETrackerMissileType>
     {
         public readonly int VanillaMissileMaxType = 0;
         private static MissileModManager m_instance = null;
@@ -24,87 +24,52 @@ namespace PulsarModLoader.Content.Components.Missile
             }
         }
 
-        MissileModManager()
+        MissileModManager() : base((int)ESlotType.E_COMP_TRACKERMISSILE)
         {
-            VanillaMissileMaxType = Enum.GetValues(typeof(ETrackerMissileType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaMissileMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type MissileMod = typeof(MissileMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (MissileMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading Missile from assembly");
-                        MissileMod MissileModHandler = (MissileMod)Activator.CreateInstance(t);
-                        if (GetMissileIDFromName(MissileModHandler.Name) == -1)
-                        {
-                            MissileTypes.Add(MissileModHandler);
-                            Logger.Info($"Added Missile: '{MissileModHandler.Name}' with ID '{GetMissileIDFromName(MissileModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add Missile from {mod.Name} with the duplicate name of '{MissileModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaMissileMaxType = VanillaMaxType;
+            MissileTypes = legacyModComps;
         }
         /// <summary>
         /// Finds Missile type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find Missile.
         /// </summary>
         /// <param name="MissileName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetMissileIDFromName(string MissileName)
+        public int GetMissileIDFromName(string MissileName) => GetIDFromName(MissileName);
+        protected override void ComponentModConstructor(PLTrackerMissile comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
-            for (int i = 0; i < MissileTypes.Count; i++)
-            {
-                if (MissileTypes[i].Name == MissileName)
-                {
-                    return i + VanillaMissileMaxType;
-                }
-            }
-            return -1;
+            base.ComponentModConstructor(comp, legacyComp, subType, level, subTypeData);
+            MissileMod missile = legacyComp as MissileMod;
+            comp.Damage = missile.Damage;
+            comp.Speed = missile.Speed;
+            comp.DamageType = missile.DamageType;
+            comp.MissileRefillPrice = missile.MissileRefillPrice;
+            comp.AmmoCapacity = missile.AmmoCapacity;
+            comp.PrefabID = missile.PrefabID;
+        }
+        static ConstructorInfo constructor = typeof(PLTrackerMissile).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(ETrackerMissileType), typeof(int), typeof(int) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
+        {
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Ldarg_3);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            //not used for this component type
+            methodOverrides.Remove(ComponentModMethods.getStatLineLeft);
+            methodOverrides.Remove(ComponentModMethods.getStatLineRight);
+            return;
         }
         public static PLTrackerMissile CreateMissile(int Subtype, int level, int inSubTypeData = 0)
         {
-            PLTrackerMissile InMissile;
-            if (Subtype >= Instance.VanillaMissileMaxType)
+            if (Instance.TryCreateComponent(Subtype, level, inSubTypeData, out PLTrackerMissile comp))
             {
-                InMissile = new PLTrackerMissile(ETrackerMissileType.MAX, level, inSubTypeData);
-                int subtypeformodded = Subtype - Instance.VanillaMissileMaxType;
-                if (subtypeformodded <= Instance.MissileTypes.Count && subtypeformodded > -1)
-                {
-                    MissileMod MissileType = Instance.MissileTypes[Subtype - Instance.VanillaMissileMaxType];
-                    InMissile.SubType = Subtype;
-                    InMissile.Name = MissileType.Name;
-                    InMissile.Desc = MissileType.Description;
-                    InMissile.m_IconTexture = MissileType.IconTexture;
-                    InMissile.Damage = MissileType.Damage;
-                    InMissile.Speed = MissileType.Speed;
-                    InMissile.DamageType = MissileType.DamageType;
-                    InMissile.MissileRefillPrice = MissileType.MissileRefillPrice;
-                    InMissile.AmmoCapacity = MissileType.AmmoCapacity;
-                    InMissile.PrefabID = MissileType.PrefabID;
-                    InMissile.m_MarketPrice = MissileType.MarketPrice;
-                    InMissile.CargoVisualPrefabID = MissileType.CargoVisualID;
-                    InMissile.CanBeDroppedOnShipDeath = MissileType.CanBeDroppedOnShipDeath;
-                    InMissile.Experimental = MissileType.Experimental;
-                    InMissile.Unstable = MissileType.Unstable;
-                    InMissile.Contraband = MissileType.Contraband;
-                    InMissile.Price_LevelMultiplierExponent = MissileType.Price_LevelMultiplierExponent;
-                    if (PhotonNetwork.isMasterClient)
-                    {
-                        InMissile.SubTypeData = (short)InMissile.AmmoCapacity;
-                    }
-                }
+                return comp;
             }
-            else
-            {
-                InMissile = new PLTrackerMissile((ETrackerMissileType)Subtype, level, inSubTypeData);
-            }
-            return InMissile;
+            return new PLTrackerMissile((ETrackerMissileType)Subtype, level, inSubTypeData);
         }
     }
     //Converts hashes to Missiles.

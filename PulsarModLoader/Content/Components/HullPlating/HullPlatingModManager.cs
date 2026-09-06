@@ -1,12 +1,14 @@
 ﻿using HarmonyLib;
+using PulsarModLoader.Content.Components.AutoTurret;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
+using static Cinemachine.DocumentationSortingAttribute;
 
 namespace PulsarModLoader.Content.Components.HullPlating
 {
-    public class HullPlatingModManager
+    public class HullPlatingModManager : LegacyInstantiatableComponentModManager<PLHullPlating, HullPlatingMod, EHullPlatingType>
     {
         public readonly int VanillaHullPlatingMaxType = 0;
         private static HullPlatingModManager m_instance = null;
@@ -23,66 +25,47 @@ namespace PulsarModLoader.Content.Components.HullPlating
             }
         }
 
-        HullPlatingModManager()
+        HullPlatingModManager() : base((int)ESlotType.E_COMP_HULLPLATING)
         {
-            VanillaHullPlatingMaxType = Enum.GetValues(typeof(ETrackerMissileType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaHullPlatingMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
+            VanillaHullPlatingMaxType = VanillaMaxType;
+            HullPlatingTypes = legacyModComps;
+        }
+        protected override string GetLegacyComponentName(HullPlatingMod comp)
+        {
+            return comp.Name;
+        }
+        protected override Type GetComponentType(HullPlatingMod comp)
+        {
+            Type type = GetConstructorTypeFromMethodBody(AccessTools.PropertyGetter(comp.GetType(), nameof(HullPlatingMod.PLHullPlating)));
+            if (type is not null)
             {
-                Assembly asm = mod.GetType().Assembly;
-                Type HullPlatingMod = typeof(HullPlatingMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (HullPlatingMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading HullPlating from assembly");
-                        HullPlatingMod HullPlatingModHandler = (HullPlatingMod)Activator.CreateInstance(t);
-                        if (GetHullPlatingIDFromName(HullPlatingModHandler.Name) == -1)
-                        {
-                            HullPlatingTypes.Add(HullPlatingModHandler);
-                            Logger.Info($"Added HullPlating: '{HullPlatingModHandler.Name}' with ID '{GetHullPlatingIDFromName(HullPlatingModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add HullPlating from {mod.Name} with the duplicate name of '{HullPlatingModHandler.Name}'");
-                        }
-                    }
-                }
+                return type;
             }
+            throw new Exception($"What is going on in {comp.Name} get component property");
         }
         /// <summary>
         /// Finds HullPlating type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find HullPlating.
         /// </summary>
         /// <param name="HullPlatingName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetHullPlatingIDFromName(string HullPlatingName)
+        public int GetHullPlatingIDFromName(string HullPlatingName) => GetIDFromName(HullPlatingName);
+        public static PLHullPlating CreateHullPlating(int Subtype, int level, int Subtypedata = 0)
         {
-            for (int i = 0; i < HullPlatingTypes.Count; i++)
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLHullPlating comp))
             {
-                if (HullPlatingTypes[i].Name == HullPlatingName)
-                {
-                    return i + VanillaHullPlatingMaxType;
-                }
+                return comp;
             }
-            return -1;
+            return new PLHullPlating((EHullPlatingType)Subtype, level);
         }
     }
     //Converts hashes to HullPlatings.
     [HarmonyPatch(typeof(PLHullPlating), "CreateHullPlatingFromHash")]
     class HullPlatingHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            int subtypeformodded = inSubType - HullPlatingModManager.Instance.VanillaHullPlatingMaxType;
-            if (subtypeformodded <= HullPlatingModManager.Instance.HullPlatingTypes.Count && subtypeformodded > -1)
-            {
-                Logger.Info("Creating HullPlating from list info");
-                __result = HullPlatingModManager.Instance.HullPlatingTypes[subtypeformodded].PLHullPlating;
-                __result.SubType = inSubType;
-                __result.Level = inLevel;
-                return false;
-            }
-            return true;
+            __result = HullPlatingModManager.CreateHullPlating(inSubType, inLevel, inSubTypeData);
+            return false;
         }
     }
 }

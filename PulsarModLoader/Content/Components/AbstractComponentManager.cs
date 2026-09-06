@@ -12,50 +12,56 @@ using System.Threading.Tasks;
 
 namespace PulsarModLoader.Content.Components
 {
-    public class ComponentReflectionConstructor<TComp> where TComp : PLShipComponent
-    {
-        public TComp CreateWithThreeArgsExplicit(Type specificComponentType, object arg1, object arg2, object arg3)
-        {
-            if (!ReflectionCache.TryGetValue(specificComponentType, out var constructor))
-            {
-                // Define the expected types of your three arguments
-                var argTypes = new[] { arg1.GetType(), arg2.GetType(), arg3.GetType() };
-
-                // Find the public constructor
-                constructor = specificComponentType.GetConstructor(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance, null, argTypes, null);
-
-                if (constructor == null)
-                {
-                    throw new Exception($"3 Parameter Constructor not found for type {specificComponentType.Name}");
-                }
-
-                ReflectionCache.TryAdd(specificComponentType, constructor);
-            }
-            TComp comp = (TComp)constructor.Invoke(new[] { arg1, arg2, arg3 });
-            if (comp is not null)
-            {
-                return comp;
-            }
-            throw new Exception($"Constructor failed for {specificComponentType.Name}");
-        }
-        protected readonly Dictionary<Type, ConstructorInfo> ReflectionCache = new Dictionary<Type, ConstructorInfo>();
-    }
     public abstract class ComponentModManager<TComp> where TComp : PLShipComponent
     {
         protected readonly int VanillaMaxType = 0;
         protected readonly int _SlotType = 0;
         protected readonly Dictionary<PulsarMod, List<Type>> componentsByMod = new Dictionary<PulsarMod, List<Type>>();
         protected readonly List<Type> components = new List<Type>(64);
-
-        protected internal ComponentModManager(int SlotType)
+        protected static List<Type> typesAlreadyProcessed = new();
+        protected static bool TypeAlreadyProcessedChildType(List<Type> childTypes, Type t)
+        {
+            if (childTypes.Count == 0)
+            {
+                return false;
+            }
+            foreach (Type type in childTypes)
+            {
+                if (type.IsAssignableFrom(t))
+                {
+                    return true;
+                }
+            }
+            return false;
+        }
+        protected internal ComponentModManager(int SlotType, int MaxType)
         {
             _SlotType = SlotType;
+            VanillaMaxType = MaxType;
+
+            Logger.Info($"{this.GetType().Name} MaxTypeint: {VanillaMaxType - 1}");
+
+            ModManager.Instance.OnModUnloaded += HandleModUnLoaded;
+
+            //List<Type> childTypes = new();
+            //foreach (Type t in typesAlreadyProcessed)
+            //{
+            //    if (t is not null && typeof(TComp).IsAssignableFrom(t))
+            //    {
+            //        childTypes.Add(t);
+            //    }
+            //}
+            //typesAlreadyProcessed.Add(typeof(TComp));
+
+            Logger.Info($"{this.GetType().Name} loading modded components:");
+
+            //Logger.Info($"Called From: {Environment.StackTrace}");
+
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
-                Assembly asm = mod.GetType().Assembly;
-                foreach (Type t in asm.GetTypes())
+                foreach (Type t in mod.GetType().Assembly.GetTypes())
                 {
-                    if (typeof(TComp).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+                    if (ValidTypeCheck<TComp>(t))
                     {
                         if (componentsByMod.ContainsKey(mod))
                         {
@@ -65,68 +71,103 @@ namespace PulsarModLoader.Content.Components
                         {
                             componentsByMod[mod] = new List<Type>() { t };
                         }
+                        Logger.Info($"Loaded {t.Name}");
                         components.Add(t);
                     }
                 }
             }
+            RebuildCaches();
         }
-        protected internal ComponentModManager(int SlotType, int MaxType) : this(SlotType)
+        protected virtual bool ValidTypeCheck<T>(Type type)
         {
-            VanillaMaxType = MaxType;
+            return typeof(T).IsAssignableFrom(type) && !type.IsInterface && !type.IsAbstract;
         }
-        protected readonly ComponentReflectionConstructor<TComp> constructorFactory = new ComponentReflectionConstructor<TComp>();
-        public virtual TComp? CreateComponent(int SubType, int Level, int SubTypeData)
+        protected readonly ComponentReflectionConstructor<TComp> componentFactory = new ComponentReflectionConstructor<TComp>();
+        protected virtual bool TryCreateComponent(int SubType, int Level, int SubTypeData, out TComp? comp)
         {
-            Type compType = components[SubType];
-            try
+            comp = null;
+            if (SubType >= VanillaMaxType)
             {
-                return constructorFactory.CreateWithThreeArgsExplicit(compType, SubType, Level, (short)SubTypeData);
+                int subid = SubType - VanillaMaxType;
+                if (subid < 0 || subid >= components.Count)
+                {
+                    return false;
+                }
+                Type compType = components[subid];
+                try
+                {
+                    comp = componentFactory.CreateComponent(compType, SubType, Level, (short)SubTypeData);
+                    if (comp is not null)
+                    {
+                        comp.ActualSlotType = (ESlotType)_SlotType;
+                        comp.SubType = SubType;
+                        return true;
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.Info($"Failed to create modded component {compType.Name}, {ex}");
+                    return false;
+                }
             }
-            catch (Exception ex)
-            {
-                Logger.Info($"Failed to create modded component {compType.Name}, {ex}");
-            }
+            return false;
+        }
+        public TComp? CreateComponentOfType<T>(int level = 0, short subTypeData = 0) where T : TComp
+        {
+            int subType = GetIDFromType(typeof(T));
+            if (subType == -1)
+                return null;
+            if (TryCreateComponent(subType, level, subTypeData, out TComp? result))
+                return result;
             return null;
         }
         protected virtual void HandleModUnLoaded(PulsarMod? mod)
         {
             if (mod is not null && componentsByMod.ContainsKey(mod))
             {
-                componentsByMod.Remove(mod);
-                components.Clear();
-                foreach (var kvp in componentsByMod)
+                List<Type> types = componentsByMod[mod];
+                foreach (Type t in types)
                 {
-                    foreach (Type type in kvp.Value)
-                    {
-                        components.Add(type);
-                    }
+                    components.Remove(t);
                 }
+                componentsByMod.Remove(mod);
             }
+            RebuildCaches();
         }
-        public virtual int GetIDFromName(string name)
+        protected readonly Dictionary<string, int> nameToIdCache = new();
+        protected readonly Dictionary<Type, int> typeToIdCache = new();
+
+        protected virtual void RebuildCaches()
         {
+            nameToIdCache.Clear();
+            typeToIdCache.Clear();
             for (int i = 0; i < components.Count; i++)
             {
-                if (components[i].Name == name)
-                {
-                    return i + VanillaMaxType;
-                }
+                var type = components[i];
+                int id = i + VanillaMaxType;
+                nameToIdCache.TryAdd(type.Name, id);
+                typeToIdCache.TryAdd(type, id);
             }
+            componentFactory.RebuildCache(components);
+        }
+
+        public virtual int GetIDFromName(string name)
+        {
+            if (nameToIdCache.TryGetValue(name, out int id))
+                return id;
+
+            Logger.Info($"Cache miss on GetIDFromName, {name}");
             return -1;
         }
 
         public virtual int GetIDFromType(Type type)
         {
-            for (int i = 0; i < components.Count; i++)
-            {
-                if (components[i] == type)
-                {
-                    return i + VanillaMaxType;
-                }
-            }
+            if (typeToIdCache.TryGetValue(type, out int id))
+                return id;
+
+            Logger.Info($"Cache miss on GetIDFromType, {type}, {type.Name}");
             return -1;
         }
-
         public IReadOnlyList<Type> ModTypes
         {
             get
@@ -137,26 +178,22 @@ namespace PulsarModLoader.Content.Components
     }
     public abstract class ComponentModManager<TComp,TEnum> : ComponentModManager<TComp> where TComp : PLShipComponent where TEnum : Enum
     {
-        protected ComponentModManager(int SlotType) : base (SlotType, Enum.GetValues(typeof(TEnum)).Length)
+        protected internal ComponentModManager(int SlotType) : base (SlotType, Enum.GetValues(typeof(TEnum)).Length)
         {
-            Logger.Info($"{typeof(TComp).Name} MaxTypeint: {VanillaMaxType - 1}");
         }
     }
-    public abstract class ComponentModManager<TComp,TLegacyModComp,TEnum> : ComponentModManager<TComp> where TComp : PLShipComponent where TLegacyModComp : ComponentModBase where TEnum : Enum 
+    public abstract class LegacyComponentModManager<TComp,TLegacyModComp> : ComponentModManager<TComp> where TComp : PLShipComponent where TLegacyModComp : ComponentModBase
     {
         protected readonly LegacyComponentCompatabilityFactory<TComp, TLegacyModComp> legacyComponentFactory;
 
-        protected ComponentModManager(int SlotType) : base (SlotType, Enum.GetValues(typeof(TEnum)).Length)
+        protected internal LegacyComponentModManager(int SlotType, int MaxType) : base (SlotType, MaxType)
         {
-            Logger.Info($"{typeof(TComp).Name} MaxTypeint: {VanillaMaxType - 1}");
-
-            legacyComponentFactory = new LegacyComponentCompatabilityFactory<TComp, TLegacyModComp>(typeof(TEnum), (ILGenerator il) => { BaseClassConstructor(il); }, (Dictionary<MethodInfo, MethodInfo> dictionary) => { ModComponentSubtypeMethods(dictionary); });
+            legacyComponentFactory = new LegacyComponentCompatabilityFactory<TComp, TLegacyModComp>((ILGenerator il) => { BaseClassConstructor(il); }, (Dictionary<MethodInfo, MethodInfo> dictionary) => { ModComponentSubtypeMethods(dictionary); });
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
-                Assembly asm = mod.GetType().Assembly;
-                foreach (Type t in asm.GetTypes())
+                foreach (Type t in mod.GetType().Assembly.GetTypes())
                 {
-                    if (typeof(TLegacyModComp).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
+                    if (ValidTypeCheck<TLegacyModComp>(t))
                     {
                         //Logger.Info($"Loading {typeof(TMod).Name} from assembly");
                         TLegacyModComp handler = (TLegacyModComp)Activator.CreateInstance(t);
@@ -173,8 +210,10 @@ namespace PulsarModLoader.Content.Components
                                 {
                                     componentsByMod[mod] = new List<Type>() { generatedType };
                                 }
+
                                 components.Add(generatedType);
-                                legacyCompLookup.Add(generatedType, handler);
+
+                                RebuildCaches();
                             }
                             catch (Exception ex)
                             {
@@ -190,7 +229,41 @@ namespace PulsarModLoader.Content.Components
                     }
                 }
             }
-            UpdateLegacyModComps();
+            RebuildCaches();
+        }
+        protected override void RebuildCaches()
+        {
+            nameToIdCache.Clear();
+            typeToIdCache.Clear();
+            legacyModComps.Clear();
+            for (int i = 0; i < components.Count; i++)
+            {
+                var type = components[i];
+                var id = i + VanillaMaxType;
+                if (legacyComponentFactory.GeneratedTypeToLegacyComp.TryGetValue(type, out TLegacyModComp comp))
+                {
+                    if (comp is not null)
+                    {
+                        nameToIdCache.TryAdd(comp.Name, id);
+                        legacyModComps.Add(comp);
+                        type = comp.GetType();
+                    }
+                    else
+                    {
+                        nameToIdCache.TryAdd(type.Name, id);
+                        legacyModComps.Add(null);
+                    }
+                    typeToIdCache.TryAdd(type, id);
+                }
+                else
+                {
+                    nameToIdCache.TryAdd(type.Name, id);
+                    typeToIdCache.TryAdd(type, id);
+                    legacyModComps.Add(null);
+                }
+                
+            }
+            componentFactory.RebuildCache(components);
         }
         protected virtual void ComponentModConstructor(TComp comp, ComponentModBase legacyComp, int subType, int level, short subTypeData)
         {
@@ -207,68 +280,174 @@ namespace PulsarModLoader.Content.Components
         }
         protected abstract void BaseClassConstructor(ILGenerator il);
         protected abstract void ModComponentSubtypeMethods(Dictionary<MethodInfo,MethodInfo> methodOverrides);
-        public override TComp? CreateComponent(int SubType, int Level, int SubTypeData)
+        protected override bool TryCreateComponent(int SubType, int Level, int SubTypeData, out TComp? comp)
         {
-            TComp? comp = base.CreateComponent(SubType, Level, SubTypeData);
+            bool flag = base.TryCreateComponent(SubType, Level, SubTypeData, out comp);
             if (comp is ILegacyComponent LegacyComp)
             {
                 ComponentModConstructor(comp, LegacyComp.GetComponentMod(), SubType, Level, (short)SubTypeData);
             }
-            return comp;
+            return flag;
         }
-        public readonly List<TLegacyModComp?> legacyModComps = new List<TLegacyModComp?>();
-        private readonly Dictionary<Type, TLegacyModComp> legacyCompLookup = new Dictionary<Type, TLegacyModComp>();
-        protected override void HandleModUnLoaded(PulsarMod? mod)
+        protected readonly List<TLegacyModComp?> legacyModComps = new();
+        
+    }
+    public abstract class LegacyComponentModManager<TComp, TLegacyModComp, TEnum> : LegacyComponentModManager<TComp, TLegacyModComp> where TComp : PLShipComponent where TLegacyModComp : ComponentModBase where TEnum : Enum
+    {
+        protected internal LegacyComponentModManager(int SlotType) : base(SlotType, Enum.GetValues(typeof(TEnum)).Length)
         {
-            base.HandleModUnLoaded(mod);
-            UpdateLegacyModComps();
         }
-        private void UpdateLegacyModComps()
+    }
+    public abstract class LegacyInstantiatableComponentModManager<TComp, TLegacyModComp> : ComponentModManager<TComp> where TComp : PLShipComponent
+    {
+        protected abstract Type GetComponentType(TLegacyModComp comp);
+        protected abstract string GetLegacyComponentName(TLegacyModComp comp);
+        //Needs to exist as due to how I figure out what legacy mod class binds to the actual component I would otherwise run the constructor for that class.
+        //Which for some currently existing components causes an infinite loop as those constructors references its own component mod manager instance which as the constructor didn't finish the instance is null so it creates a new instance so on a so forth
+        internal Type? GetConstructorTypeFromMethodBody(MethodInfo method)
         {
-            legacyModComps.Clear();
-            legacyCompLookup.Clear();
-            foreach (var type in components)
+            //Extract the IL bytes and the module context
+            MethodBody body = method.GetMethodBody();
+            byte[] ilBytes = body.GetILAsByteArray();
+            Module module = method.Module;
+
+            //Scan the bytes for the 'newobj' opcode (0x73)
+            for (int i = 0; i < ilBytes.Length; i++)
             {
-                if (typeof(ILegacyComponent).IsAssignableFrom(type))
+                if (ilBytes[i] == 0x73) // 0x73 is the byte representation of 'newobj'
                 {
-                    FieldInfo legacyField = type.GetField("_legacy", BindingFlags.Static | BindingFlags.NonPublic);
-                    TLegacyModComp comp = (TLegacyModComp)legacyField.GetValue(null);
-                    legacyModComps.Add(comp);
-                    legacyCompLookup.Add(type, comp);
+                    // The next 4 bytes make up a 32-bit Integer Metadata Token
+                    int token = BitConverter.ToInt32(ilBytes, i + 1);
+
+                    try
+                    {
+                        // Resolve the token into the actual constructor method info
+                        ConstructorInfo ctor = (ConstructorInfo)module.ResolveMethod(token);
+
+                        // Get the parent type of that constructor
+                        Type constructedType = ctor.DeclaringType;
+
+                        if (typeof(TComp).IsAssignableFrom(constructedType))
+                        {
+                            //This has to exist as Runtime types do not match typeof(someclass) exactly
+                            constructedType = constructedType.UnderlyingSystemType;
+                            return constructedType;
+                        }
+                    }
+                    catch (Exception ex)
+                    {
+                        //Couldn't resolve the token for that constructor
+                        Logger.Info($"Could not resolve token 0x{token:X}: {ex.Message}");
+                    }
+
+                    // Skip the 4 token bytes we just read
+                    i += 4;
+                }
+            }
+            return null;
+        }
+
+        protected internal LegacyInstantiatableComponentModManager(int inSlotType, int MaxType) : base (inSlotType, MaxType)
+        {
+            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
+            {
+                foreach (Type t in mod.GetType().Assembly.GetTypes())
+                {
+                    if (typeof(TLegacyModComp).IsAssignableFrom(t) && !t.IsAbstract && !t.IsInterface)
+                    {
+                        //Logger.Info($"Loading {typeof(TMod).Name} from assembly");
+                        TLegacyModComp handler = (TLegacyModComp)Activator.CreateInstance(t);
+                        Type componentType = GetComponentType(handler);
+                        if (!components.Contains(componentType))
+                        {
+                            if (componentsByMod.ContainsKey(mod))
+                            {
+                                componentsByMod[mod].Add(componentType);
+                            }
+                            else
+                            {
+                                componentsByMod[mod] = new List<Type>() { componentType };
+                            }
+                            Logger.Info($"Loaded {t.Name}");
+                            components.Add(componentType);
+                        }
+                        if (TypeToLegacyType.TryAdd(componentType, handler))
+                        {
+                            Logger.Info($"Loaded Legacy Turret Component {GetLegacyComponentName(handler)}");
+                        }
+                    }
+                }
+            }
+            RebuildCaches();
+        }
+        protected readonly Dictionary<Type, TLegacyModComp> TypeToLegacyType = new();
+        protected readonly List<TLegacyModComp?> legacyModComps = new();
+        protected override void RebuildCaches()
+        {
+            nameToIdCache.Clear();
+            typeToIdCache.Clear();
+            legacyModComps.Clear();
+            for (int i = 0; i < components.Count; i++)
+            {
+                var type = components[i];
+                var id = i + VanillaMaxType;
+                if (TypeToLegacyType.TryGetValue(type, out TLegacyModComp comp))
+                {
+                    if (comp is not null)
+                    {
+                        nameToIdCache.TryAdd(GetLegacyComponentName(comp), id);
+                        legacyModComps.Add(comp);
+                    }
+                    else
+                    {
+                        nameToIdCache.TryAdd(type.Name, id);
+                        legacyModComps.Add(default);
+                    }
                 }
                 else
                 {
-                    legacyModComps.Add(null);
+                    nameToIdCache.TryAdd(type.Name, id);
+                    legacyModComps.Add(default);
                 }
+                typeToIdCache.TryAdd(type, id);
+
             }
+            componentFactory.RebuildCache(components);
         }
-        
-        public override int GetIDFromName(string name)
+        protected override bool TryCreateComponent(int SubType, int Level, int SubTypeData, out TComp? comp)
         {
-            for (int i = 0; i < components.Count; i++)
+            bool flag = base.TryCreateComponent(SubType, Level, SubTypeData, out comp);
+            if (comp is not null && TypeToLegacyType.ContainsKey(comp.GetType()))
             {
-                if (components[i].Name == name || (legacyCompLookup.TryGetValue(components[i], out TLegacyModComp legacy) && legacy.Name == name))
-                {
-                    return i + VanillaMaxType;
-                }
+                comp.SubType = SubType;
+                comp.Level = Level;
+                comp.SubTypeData = (short)SubTypeData;
             }
-            return -1;
+            return flag;
         }
-        public override int GetIDFromType(Type type)
+    }
+    public abstract class LegacyInstantiatableComponentModManager<TComp, TLegacyModComp, TEnum> : LegacyInstantiatableComponentModManager<TComp, TLegacyModComp> where TComp : PLShipComponent where TEnum : Enum
+    {
+        protected internal LegacyInstantiatableComponentModManager(int inSlotType) : base(inSlotType, Enum.GetValues(typeof(TEnum)).Length)
         {
-            for (int i = 0; i < components.Count; i++)
-            {
-                if (components[i] == type || (legacyCompLookup.TryGetValue(components[i], out TLegacyModComp legacy) && legacy.GetType() == type))
-                {
-                    return i + VanillaMaxType;
-                }
-            }
-            return -1;
         }
     }
     public interface ILegacyComponent
     {
-        public Type GetLegacyType();
         public ComponentModBase GetComponentMod();
+    }
+    public enum EModdedTurretType
+    {
+        Normal,
+        Mega,
+        Auto
+    }
+    public class TurretType : Attribute
+    {
+        public EModdedTurretType type { get; set; }
+        public TurretType(EModdedTurretType type)
+        {
+            this.type = type;
+        }
     }
 }

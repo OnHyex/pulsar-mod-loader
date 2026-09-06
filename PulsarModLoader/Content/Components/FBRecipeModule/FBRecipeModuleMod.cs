@@ -5,7 +5,7 @@ namespace PulsarModLoader.Content.Components.FBRecipeModule
     public abstract class FBRecipeModuleMod : ComponentModBase
     {
         public FBRecipeModuleMod()
-        { 
+        {
         }
         public virtual int[] ItemTypeToProduce
         {

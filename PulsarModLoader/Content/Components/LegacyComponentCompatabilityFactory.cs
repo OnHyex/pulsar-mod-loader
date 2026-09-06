@@ -1,14 +1,12 @@
 ﻿#nullable enable
 using HarmonyLib;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
-using System.Collections.ObjectModel;
 using System.Linq;
 using System.Reflection;
 using System.Reflection.Emit;
-using System.Text;
-using System.Threading.Tasks;
-using static AkMIDIEvent;
+using PulsarModLoader.Content.Components.InternalHelperClasses;
 
 namespace PulsarModLoader.Content.Components
 {
@@ -19,9 +17,8 @@ namespace PulsarModLoader.Content.Components
         private readonly Action<ILGenerator> componentBaseConstructorBuilder;
         private static readonly AssemblyBuilder asm = AssemblyBuilder.DefineDynamicAssembly(new AssemblyName("LegacyComponentCompatabilityDynamicAssembly"), AssemblyBuilderAccess.Run);
         private static readonly ModuleBuilder module = asm.DefineDynamicModule("MainModule");
-        private readonly Type? baseEnumType;
         private readonly Dictionary<MethodInfo, MethodInfo> methodOverrides;
-        public LegacyComponentCompatabilityFactory(Type? Enum, Action<ILGenerator> componentBaseConstructorBuilder, Action<Dictionary<MethodInfo, MethodInfo>> nonComponentBaseMethods)
+        internal LegacyComponentCompatabilityFactory(Action<ILGenerator> componentBaseConstructorBuilder, Action<Dictionary<MethodInfo, MethodInfo>> nonComponentBaseMethods)
         {
             this.componentBaseConstructorBuilder = componentBaseConstructorBuilder;
 
@@ -77,7 +74,7 @@ namespace PulsarModLoader.Content.Components
             //Adds / Overwrites methods in the methodOverrides dictionary for that specific legacy component type to map to the most recent override for whatever subclass is being used
             nonComponentBaseMethods(methodOverrides);
         }
-        private static readonly MethodInfo objectGetType = typeof(object).GetMethod(nameof(GetType));
+        public readonly Dictionary<Type,TLegacyComp> GeneratedTypeToLegacyComp = new Dictionary<Type,TLegacyComp>();
         public Type DefineNewType(TLegacyComp legacy)
         {
             TypeBuilder typeBuilder = module.DefineType(legacy.GetType().Name + "_Compat", TypeAttributes.Public | TypeAttributes.Class, typeof(TComp));
@@ -90,24 +87,18 @@ namespace PulsarModLoader.Content.Components
 
             // constructor taking SubType, Level, SubtypeData
             ConstructorBuilder constructor = typeBuilder.DefineConstructor(MethodAttributes.Public, CallingConventions.Standard, new Type[] { typeof(int), typeof(int), typeof(short) });
+            constructor.DefineParameter(1, ParameterAttributes.None, "inSubType");
+            constructor.DefineParameter(2, ParameterAttributes.None, "inLevel");
+            constructor.DefineParameter(3, ParameterAttributes.None, "inSubTypeData");
             ILGenerator constructorGenerator = constructor.GetILGenerator();
             componentBaseConstructorBuilder(constructorGenerator);
 
             // Define legacy interface
             typeBuilder.AddInterfaceImplementation(typeof(ILegacyComponent));
 
-            // Define GetLegacyType method
-            MethodBuilder methodBuilder = typeBuilder.DefineMethod(nameof(ILegacyComponent.GetLegacyType), MethodAttributes.Public | MethodAttributes.Virtual, typeof(Type), Type.EmptyTypes);
-            ILGenerator il = methodBuilder.GetILGenerator();
-            il.Emit(OpCodes.Ldsfld, legacyField);
-            il.Emit(OpCodes.Call, objectGetType);
-            il.Emit(OpCodes.Ret);
-
-            typeBuilder.DefineMethodOverride(methodBuilder,typeof(ILegacyComponent).GetMethod(nameof(ILegacyComponent.GetLegacyType)));
-
             // Define GetComponentMod method
-            methodBuilder = typeBuilder.DefineMethod(nameof(ILegacyComponent.GetComponentMod), MethodAttributes.Public | MethodAttributes.Virtual, typeof(ComponentModBase), Type.EmptyTypes);
-            il = methodBuilder.GetILGenerator();
+            MethodBuilder methodBuilder = typeBuilder.DefineMethod(nameof(ILegacyComponent.GetComponentMod), MethodAttributes.Public | MethodAttributes.Virtual, typeof(ComponentModBase), Type.EmptyTypes);
+            ILGenerator il = methodBuilder.GetILGenerator();
             il.Emit(OpCodes.Ldsfld, legacyField);
             il.Emit(OpCodes.Castclass, typeof(ComponentModBase));
             il.Emit(OpCodes.Ret);
@@ -127,12 +118,13 @@ namespace PulsarModLoader.Content.Components
             }
 
             Type generatedType = typeBuilder.CreateType();
-
+            typeBuilder.CreateTypeInfo();
             generatedType.GetField("_legacy", BindingFlags.Static | BindingFlags.NonPublic).SetValue(null, legacy);
+            GeneratedTypeToLegacyComp.TryAdd(generatedType, legacy);
             return generatedType;
         }
         private static MethodInfo shipStats = AccessTools.PropertyGetter(typeof(PLShipComponent), nameof(PLShipComponent.ShipStats));
-        public static void DefineMethodForwarder(TypeBuilder typeBuilder, FieldInfo legacyField, MethodInfo targetMethod, MethodInfo legacyMethod)
+        private static void DefineMethodForwarder(TypeBuilder typeBuilder, FieldInfo legacyField, MethodInfo targetMethod, MethodInfo legacyMethod)
         {
             ParameterInfo[] parameters = targetMethod.GetParameters();
 
@@ -150,7 +142,7 @@ namespace PulsarModLoader.Content.Components
             // Load this instance
             il.Emit(OpCodes.Ldarg_0);
 
-            for (short i = 0; i < paramTypes.Length; i++)
+            for (int i = 0; i < paramTypes.Length; i++)
             {
                 switch (i + 1)
                 {
@@ -174,29 +166,52 @@ namespace PulsarModLoader.Content.Components
             // Load static legacy instance
             il.Emit(OpCodes.Ldsfld, legacyField);
 
+            parameters = legacyMethod.GetParameters();
 
+            Type[] legacyParamTypes = Array.ConvertAll(parameters, p => p.ParameterType);
 
-            // Load all parameters
-            for (short i = 0; i < paramTypes.Length; i++)
+            if (legacyMethod.IsStatic)
             {
-                //ComponentMod AddStats and several other methods take the PLShipComponent instead of PLShipStats which is supplied by Ldarg_0
-                if (paramTypes[i] == typeof(PLShipStats))
+                il.Emit(OpCodes.Ldarg_0);
+            }
+            else
+            {
+                // Load all parameters
+                for (int i = 0; i < legacyParamTypes.Length; i++)
                 {
-                    il.Emit(OpCodes.Ldarg_0);
-                }
-                switch (i + 1)
-                {
-                    case 1: il.Emit(OpCodes.Ldarg_1); break;
-                    case 2: il.Emit(OpCodes.Ldarg_2); break;
-                    case 3: il.Emit(OpCodes.Ldarg_3); break;
-                    default:
-                        il.Emit(OpCodes.Ldarg_S, i + 1);
-                        break;
+                    //ComponentMod AddStats and several other methods take the PLShipComponent instead of PLShipStats which is supplied by Ldarg_0
+                    if (legacyParamTypes[i] == typeof(PLShipComponent))
+                    {
+                        il.Emit(OpCodes.Ldarg_0);
+                        continue;
+                    }
+                    for (int j = 0; j < paramTypes.Length; j++)
+                    {
+                        if (legacyParamTypes[i] == paramTypes[j])
+                        {
+                            switch (i + 1)
+                            {
+                                case 1: il.Emit(OpCodes.Ldarg_1); break;
+                                case 2: il.Emit(OpCodes.Ldarg_2); break;
+                                case 3: il.Emit(OpCodes.Ldarg_3); break;
+                                default:
+                                    il.Emit(OpCodes.Ldarg_S, i + 1);
+                                    break;
+                            }
+                        }
+                    }
                 }
             }
 
             // Call legacy method
-            il.Emit(OpCodes.Callvirt, legacyMethod);
+            if (legacyMethod.IsStatic)
+            {
+                il.Emit(OpCodes.Call, legacyMethod);
+            }
+            else
+            {
+                il.Emit(OpCodes.Callvirt, legacyMethod);
+            }
 
             il.Emit(OpCodes.Ret);
 

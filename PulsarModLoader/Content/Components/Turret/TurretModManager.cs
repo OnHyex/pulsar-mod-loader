@@ -1,12 +1,13 @@
 ﻿using HarmonyLib;
+using PulsarModLoader.Content.Components.MegaTurret;
+using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
-using PulsarModLoader.Utilities;
 
 namespace PulsarModLoader.Content.Components.Turret
 {
-    public class TurretModManager
+    public class TurretModManager : LegacyInstantiatableComponentModManager<PLTurret, TurretMod, ETurretType>
     {
         public readonly int VanillaTurretMaxType = 0;
         private static TurretModManager m_instance = null;
@@ -23,65 +24,52 @@ namespace PulsarModLoader.Content.Components.Turret
             }
         }
 
-        TurretModManager()
+        TurretModManager() : base((int)ESlotType.E_COMP_TURRET)
         {
-            VanillaTurretMaxType = Enum.GetValues(typeof(ETurretType)).Length;
-            Logger.Info($"MaxTypeint = {VanillaTurretMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
+            VanillaTurretMaxType = VanillaMaxType;
+            TurretTypes = legacyModComps;
+        }
+        protected override string GetLegacyComponentName(TurretMod comp)
+        {
+            return comp.Name;
+        }
+        protected override Type GetComponentType(TurretMod comp)
+        {
+            Type type = GetConstructorTypeFromMethodBody(AccessTools.PropertyGetter(comp.GetType(), nameof(TurretMod.PLTurret)));
+            if (type is not null)
             {
-                Assembly asm = mod.GetType().Assembly;
-                Type TurretMod = typeof(TurretMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (TurretMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading Turret from assembly");
-                        TurretMod TurretModHandler = (TurretMod)Activator.CreateInstance(t);
-                        if (GetTurretIDFromName(TurretModHandler.Name) == -1)
-                        {
-                            TurretTypes.Add(TurretModHandler);
-                            Logger.Info($"Added Turret: '{TurretModHandler.Name}' with ID '{GetTurretIDFromName(TurretModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add Turret from {mod.Name} with the duplicate name of '{TurretModHandler.Name}'");
-                        }
-                    }
-                }
+                return type;
             }
+            throw new Exception($"What is going on in {comp.Name} get component property");
+        }
+        protected override bool ValidTypeCheck<T>(Type type)
+        {
+            return base.ValidTypeCheck<T>(type) && type.GetCustomAttribute<TurretType>()?.type == EModdedTurretType.Normal;
         }
         /// <summary>
         /// Finds Turret type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find Turret.
         /// </summary>
         /// <param name="TurretName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetTurretIDFromName(string TurretName)
+        public int GetTurretIDFromName(string TurretName) => GetIDFromName(TurretName);
+        internal PLTurret CreateModdedTurret(int Subtype, int level, int Subtypedata)
         {
-            for (int i = 0; i < TurretTypes.Count; i++)
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLTurret comp))
             {
-                if (TurretTypes[i].Name == TurretName)
-                {
-                    return i + VanillaTurretMaxType;
-                }
+                return comp;
             }
-            return -1;
+            return null;
         }
     }
     //Converts hashes to Turrets.
     [HarmonyPatch(typeof(PLTurret), "CreateTurretFromHash")]
     class TurretHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            int subtypeformodded = inSubType - TurretModManager.Instance.VanillaTurretMaxType;
-            if (subtypeformodded <= TurretModManager.Instance.TurretTypes.Count && subtypeformodded > -1)
-            {
-                Logger.Info("Creating Turret from list info");
-                __result = TurretModManager.Instance.TurretTypes[subtypeformodded].PLTurret;
-                __result.SubType = inSubType;
-                __result.Level = inLevel;
+            __result = TurretModManager.Instance.CreateModdedTurret(inSubType, inLevel, inSubTypeData);
+            if (__result is not null)
                 return false;
-            }
             return true;
         }
     }

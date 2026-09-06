@@ -1,13 +1,15 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Content.Components.Missile;
 using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Components.MissionShipComponent
 {
-    public class MissionShipComponentModManager
+    public class MissionShipComponentModManager : LegacyComponentModManager<PLMissionShipComponent, MissionShipComponentMod>
     {
         public readonly int VanillaMissionShipComponentMaxType = 0;
         private static MissionShipComponentModManager m_instance = null;
@@ -24,86 +26,50 @@ namespace PulsarModLoader.Content.Components.MissionShipComponent
             }
         }
 
-        MissionShipComponentModManager()
+        MissionShipComponentModManager() : base((int)ESlotType.E_COMP_MISSION_COMPONENT, 13)
         {
-            VanillaMissionShipComponentMaxType = 13;
-            Logger.Info($"MaxTypeint = {VanillaMissionShipComponentMaxType - 1}");
-            foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
-            {
-                Assembly asm = mod.GetType().Assembly;
-                Type MissionShipComponentMod = typeof(MissionShipComponentMod);
-                foreach (Type t in asm.GetTypes())
-                {
-                    if (MissionShipComponentMod.IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
-                    {
-                        Logger.Info("Loading MissionShipComponent from assembly");
-                        MissionShipComponentMod MissionShipComponentModHandler = (MissionShipComponentMod)Activator.CreateInstance(t);
-                        if (GetMissionShipComponentIDFromName(MissionShipComponentModHandler.Name) == -1)
-                        {
-                            MissionShipComponentTypes.Add(MissionShipComponentModHandler);
-                            Logger.Info($"Added MissionShipComponent: '{MissionShipComponentModHandler.Name}' with ID '{GetMissionShipComponentIDFromName(MissionShipComponentModHandler.Name)}'");
-                        }
-                        else
-                        {
-                            Logger.Info($"Could not add MissionShipComponent from {mod.Name} with the duplicate name of '{MissionShipComponentModHandler.Name}'");
-                        }
-                    }
-                }
-            }
+            VanillaMissionShipComponentMaxType = VanillaMaxType;
+            MissionShipComponentTypes = legacyModComps;
         }
         /// <summary>
         /// Finds MissionShipComponent type equivilent to given name and returns Subtype ID needed to spawn. Returns -1 if couldn't find MissionShipComponent.
         /// </summary>
         /// <param name="MissionShipComponentName">Name of Component</param>
         /// <returns>Subtype ID of component</returns>
-        public int GetMissionShipComponentIDFromName(string MissionShipComponentName)
+        public int GetMissionShipComponentIDFromName(string MissionShipComponentName) => GetIDFromName(MissionShipComponentName);
+        static ConstructorInfo constructor = typeof(PLMissionShipComponent).GetConstructor(BindingFlags.Public | BindingFlags.Instance, null, new Type[] { typeof(int), typeof(int) }, null);
+        protected override void BaseClassConstructor(ILGenerator il)
         {
-            for (int i = 0; i < MissionShipComponentTypes.Count; i++)
-            {
-                if (MissionShipComponentTypes[i].Name == MissionShipComponentName)
-                {
-                    return i + VanillaMissionShipComponentMaxType;
-                }
-            }
-            return -1;
+            il.Emit(OpCodes.Ldarg_0);
+            il.Emit(OpCodes.Ldarg_1);
+            il.Emit(OpCodes.Ldarg_2);
+            il.Emit(OpCodes.Call, constructor);
+            il.Emit(OpCodes.Ret);
+        }
+        protected override void ModComponentSubtypeMethods(Dictionary<MethodInfo, MethodInfo> methodOverrides)
+        {
+            return;
         }
         public static PLMissionShipComponent CreateMissionShipComponent(int Subtype, int level)
         {
-            PLMissionShipComponent InMissionShipComponent;
-            if (Subtype >= Instance.VanillaMissionShipComponentMaxType)
+            return CreateMissionShipComponent(Subtype, level, 0);
+        }
+        public static PLMissionShipComponent CreateMissionShipComponent(int Subtype, int level, int Subtypedata)
+        {
+            if (Instance.TryCreateComponent(Subtype, level, Subtypedata, out PLMissionShipComponent comp))
             {
-                InMissionShipComponent = new PLMissionShipComponent(0, level);
-                int subtypeformodded = Subtype - Instance.VanillaMissionShipComponentMaxType;
-                if (subtypeformodded <= Instance.MissionShipComponentTypes.Count && subtypeformodded > -1)
-                {
-                    MissionShipComponentMod MissionShipComponentType = Instance.MissionShipComponentTypes[Subtype - Instance.VanillaMissionShipComponentMaxType];
-                    InMissionShipComponent.SubType = Subtype;
-                    InMissionShipComponent.Name = MissionShipComponentType.Name;
-                    InMissionShipComponent.Desc = MissionShipComponentType.Description;
-                    InMissionShipComponent.m_IconTexture = MissionShipComponentType.IconTexture;
-                    InMissionShipComponent.m_MarketPrice = MissionShipComponentType.MarketPrice;
-                    InMissionShipComponent.CargoVisualPrefabID = MissionShipComponentType.CargoVisualID;
-                    InMissionShipComponent.CanBeDroppedOnShipDeath = MissionShipComponentType.CanBeDroppedOnShipDeath;
-                    InMissionShipComponent.Experimental = MissionShipComponentType.Experimental;
-                    InMissionShipComponent.Unstable = MissionShipComponentType.Unstable;
-                    InMissionShipComponent.Contraband = MissionShipComponentType.Contraband;
-                    InMissionShipComponent.Price_LevelMultiplierExponent = MissionShipComponentType.Price_LevelMultiplierExponent;
-                }
+                return comp;
             }
-            else
-            {
-                InMissionShipComponent = new PLMissionShipComponent(Subtype, level);
-            }
-            return InMissionShipComponent;
+            return new PLMissionShipComponent(Subtype, level);
         }
     }
     //Converts hashes to MissionShipComponents.
     [HarmonyPatch(typeof(PLMissionShipComponent), "CreateMissionComponentFromHash")]
     class MissionShipComponentHashFix
     {
-        static bool Prefix(int inSubType, int inLevel, ref PLShipComponent __result)
+        static bool Prefix(int inSubType, int inLevel, int inSubTypeData, ref PLShipComponent __result)
         {
-            __result = MissionShipComponentModManager.CreateMissionShipComponent(inSubType, inLevel);
+            __result = MissionShipComponentModManager.CreateMissionShipComponent(inSubType, inLevel, inSubTypeData);
             return false;
         }
     }
