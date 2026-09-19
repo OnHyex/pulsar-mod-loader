@@ -27,14 +27,14 @@
             int index = ModMessageHelper.indexableModMessageHandlers.IndexOf(fullName);
             if (index != -1)
             {
-                ModMessageHelper.Instance.photonView.RPC("RecieveIndexedMessage", player, new object[]
+                ModMessageHelper.Instance?.photonView?.RPC("RecieveIndexedMessage", player, new object[]
                 {
                     index,
                     arguments
                 });
                 return;
             }
-            ModMessageHelper.Instance.photonView.RPC("ReceiveMessage", player, new object[]
+            ModMessageHelper.Instance?.photonView?.RPC("ReceiveMessage", player, new object[]
             {
                 fullName,
                 arguments
