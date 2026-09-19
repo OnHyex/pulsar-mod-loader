@@ -47,6 +47,8 @@ namespace PulsarModLoader.Content.Talents
 
         TalentModManager()
         {
+            ModManager.Instance.OnModUnloaded += OnModUnloaded;
+
             vanillaTalentMaxType = Enum.GetValues(typeof(ETalents)).Length;
             Logger.Info($"Talents Vanilla MaxTypeint = {vanillaTalentMaxType - 1}");
             extraTalentLockedStatus.Add(0, 0L);
@@ -94,6 +96,55 @@ namespace PulsarModLoader.Content.Talents
             }
         }
 
+        void OnModUnloaded(PulsarMod mod)
+        {
+            ConcurrentBag<TalentMod> talentTypesToRemove = new();
+            TalentTypes.AsParallel().ForAll((t) =>
+            {
+                if (t.GetType().Assembly == mod.GetType().Assembly)
+                {
+                    talentTypesToRemove.Add(t);
+                }
+            });
+            if (talentTypesToRemove.Count == 0)
+                return;
+            //Remove talents related to unloaded mod
+            while (talentTypesToRemove.TryTake(out TalentMod toBeRemoved))
+            {
+                TalentTypes.Remove(toBeRemoved);
+            }
+            //Reset the cache of any modded talents
+            foreach (var t in TalentTypes)
+            {
+                TalentCreation.cachedTalents.Remove(t.TalentAssignment);
+            }
+            extraTalentLockedStatus.Clear();
+            hiddenTalentStatus.Clear();
+            extraTalentLockedStatus.Add(0, 0L);
+            hiddenTalentStatus.Add(0, 0L);
+            //Rebuild all the caches
+            foreach (var talentModHandler in TalentTypes)
+            {
+                int TalentID = GetTalentIDFromName(talentModHandler.Name);
+                TalentCreation.cachedTalents[talentModHandler.TalentAssignment].Add((ETalents)TalentID);
+                if (TalentID / 64 >= extraTalentLockedStatus.Keys.Count)
+                {   // Extend the ObscureLong TalentLockedStatus for > 64 talents
+                    extraTalentLockedStatus.Add(extraTalentLockedStatus.Keys.Count, 0L);
+                }
+                if (talentModHandler.NeedsToBeResearched)
+                {
+                    LockTalent(TalentID);
+                }
+                if (TalentID / 64 >= hiddenTalentStatus.Keys.Count)
+                {   // Extend the ObscureLong TalentLockedStatus for > 64 talents
+                    hiddenTalentStatus.Add(hiddenTalentStatus.Keys.Count, 0L);
+                }
+                if (talentModHandler.HiddenByDefault)
+                {
+                    HideTalent(TalentID);
+                }
+            }
+        }
 
         /// <summary>
         /// Finds Talent ID equivilent to given name. Returns -1 if couldn't find Talent.
