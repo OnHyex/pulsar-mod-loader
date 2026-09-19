@@ -1,15 +1,15 @@
 ﻿using CodeStage.AntiCheat.ObscuredTypes;
 using HarmonyLib;
+using PulsarModLoader.Patches;
 using System;
 using System.Collections.Generic;
-using System.Reflection.Emit;
-using static PulsarModLoader.Patches.HarmonyHelpers;
-using static HarmonyLib.AccessTools;
 using System.Linq;
-using PulsarModLoader.SaveData;
-using System.IO;
 using System.Reflection;
-using PulsarModLoader.CustomGUI;
+using System.Reflection.Emit;
+using UnityEngine;
+using UnityEngine.UI;
+using static HarmonyLib.AccessTools;
+using static PulsarModLoader.Patches.HarmonyHelpers;
 
 namespace PulsarModLoader.Content.Talents
 {
@@ -30,28 +30,6 @@ namespace PulsarModLoader.Content.Talents
             PatchMode.REPLACE);
         }
         public static int Override63TranspilerPatch() => Enum.GetValues(typeof(ETalents)).Length + TalentModManager.Instance.TalentTypes.Count;
-        public static IEnumerable<CodeInstruction> Override63ShipInfoTranspiler(IEnumerable<CodeInstruction> instructions)
-        {
-            return PatchBySequence(instructions,
-            new List<CodeInstruction>()
-            {
-                new CodeInstruction(OpCodes.Ldc_I4_S, (sbyte)63),
-            },
-            new List<CodeInstruction>()
-            {
-                new CodeInstruction(OpCodes.Ldarg_0),
-                new CodeInstruction(OpCodes.Call, Method(typeof(HelperMethods), nameof(ShipInfoOverride63Patch)))
-            },
-            PatchMode.REPLACE);
-        }
-        public static int ShipInfoOverride63Patch(PLShipInfo instance)
-        {
-            if (instance != null && instance.GetIsPlayerShip())
-            {
-                return Enum.GetValues(typeof(ETalents)).Length + TalentModManager.Instance.TalentTypes.Count;
-            }
-            return 0;
-        }
     }
 
     // Makes new Talent Infos retrievable
@@ -108,15 +86,169 @@ namespace PulsarModLoader.Content.Talents
     [HarmonyPatch(typeof(PLShipInfo), "UpdateResearchTalentChoices")]
     public class ResearchTalentSizePatch
     {
-        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions) => HelperMethods.Override63ShipInfoTranspiler(instructions);
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            instructions = PatchBySequence(instructions,
+            new List<CodeInstruction>()
+            {
+                new CodeInstruction(OpCodes.Ldc_I4_S, (sbyte)63),
+            },
+            new List<CodeInstruction>()
+            {
+                new CodeInstruction(OpCodes.Ldarg_0), //ship instance
+                new CodeInstruction(OpCodes.Call, Method(typeof(ResearchTalentSizePatch), nameof(Override63OnlyPlayerShipPatch)))
+            },
+            PatchMode.REPLACE);
+
+            return HarmonyHelpers.PatchBySequence(
+                instructions,
+                new CodeInstruction[]
+                {
+                    new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(ResearchTalentSizePatch),nameof(Override63OnlyPlayerShipPatch))),
+                    new CodeInstruction(OpCodes.Blt)
+                },
+                new CodeInstruction[]
+                {
+                    new CodeInstruction(OpCodes.Ldarg_0), //ship instance
+                    new CodeInstruction(OpCodes.Ldloc_1), //num
+                    new CodeInstruction(OpCodes.Call, AccessTools.Method(typeof(ResearchTalentSizePatch), nameof(ResearchScreenArrowsPatch)))
+                },
+                PatchMode.AFTER,
+                CheckMode.NONNULL);
+        }
+        public static int Override63OnlyPlayerShipPatch(PLShipInfo instance)
+        {
+            if (instance != null && instance.GetIsPlayerShip())
+            {
+                return Enum.GetValues(typeof(ETalents)).Length + TalentModManager.Instance.TalentTypes.Count;
+            }
+            return 0;
+        }
+        public static void ResearchScreenArrowsPatch(PLShipInfo instance, int num)
+        {
+            if (instance.ResearchChoice_PageLabel != null)
+            {
+                int num6 = Mathf.Clamp(num - 1, 0, int.MaxValue) / 5;
+                if (num6 == 0)
+                {
+                    if (instance.ResearchChoice_Left.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_Left.gameObject.SetActive(false);
+                    }
+                    if (instance.ResearchChoice_Right.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_Right.gameObject.SetActive(false);
+                    }
+                    if (instance.ResearchChoice_PageLabel.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_PageLabel.gameObject.SetActive(false);
+                    }
+                    instance.ResearchChoicePage = 0;
+                }
+                else
+                {
+                    if (!instance.ResearchChoice_Left.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_Left.gameObject.SetActive(true);
+                    }
+                    if (!instance.ResearchChoice_Right.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_Right.gameObject.SetActive(true);
+                    }
+                    if (!instance.ResearchChoice_PageLabel.gameObject.activeSelf)
+                    {
+                        instance.ResearchChoice_PageLabel.gameObject.SetActive(true);
+                    }
+                    if (instance.ResearchChoicePage > num6)
+                    {
+                        instance.ResearchChoicePage = 0;
+                    }
+                    else if (instance.ResearchChoicePage < 0)
+                    {
+                        instance.ResearchChoicePage = num6;
+                    }
+                    Text researchChoice_PageLabel = instance.ResearchChoice_PageLabel;
+                    int l = instance.ResearchChoicePage + 1;
+                    string text = l.ToString();
+                    string text2 = " / ";
+                    l = num6 + 1;
+                    researchChoice_PageLabel.text = text + text2 + l.ToString();
+                }
+            }
+        }
     }
 
     [HarmonyPatch(typeof(PLShipInfo), "Update")]
     public class ResearchTalentSizePatch2
     {
-        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions) => HelperMethods.Override63ShipInfoTranspiler(instructions);
-    }
+        //Removes the for loop that checks all talents if they are locked or not in the PLShipInfo Update() method,
+        //I am moving it all into the UpdateResearchScreenMethod as to share the for loop from that method
+        public static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+        {
+            List<CodeInstruction> codes = instructions.ToList();
 
+            MethodInfo isTalentVisibleMethod = AccessTools.Method(typeof(PLGlobal), nameof(PLGlobal.IsTalentVisibleForResearch));
+
+            // Find: IL_12A6 call bool PLGlobal::IsTalentVisibleForResearch(ETalents)
+            int talentCallIndex = codes.FindIndex(code =>
+                code.Calls(isTalentVisibleMethod));
+
+            if (talentCallIndex == -1)
+            { 
+                PulsarModLoader.Utilities.Logger.Info("PLShipInfo talents transpiler: Could not find PLGlobal.IsTalentVisibleForResearch call.");
+                return instructions;
+            }
+
+            //Work backwards from:
+            // 
+            // IL_12A6 call IsTalentVisibleForResearch
+            // 
+            // Expected sequence:
+            //
+            //IL_129D ldc.i4.0      : talentCallIndex - 6 barring other transpilers
+            // IL_129E stloc.2
+            // IL_129F ldc.i4.0
+            // IL_12A0 stloc.s V_27
+            //IL_12A2 br.s...
+            // IL_12A4 ldloc.s V_27
+            // IL_12A6 call...
+            int startIndex = talentCallIndex - 6;
+
+            MethodInfo setTextMethod = AccessTools.PropertySetter(typeof(Text), nameof(Text.text));
+
+            // Find: IL_1414 callvirt void UnityEngine.UI.Text::set_text(string)
+            int endIndex = codes.FindIndex(
+                talentCallIndex,
+                code => code.Calls(setTextMethod));
+
+            if (endIndex == -1)
+            {
+                PulsarModLoader.Utilities.Logger.Info("PLShipInfo transpiler: Could not find ResearchChoice_PageLabel text setter.");
+                return instructions;
+            }
+
+
+            //Create replacement nop instruction and copy labels and exception blocks
+            CodeInstruction nop = new CodeInstruction(OpCodes.Nop);
+
+            nop.labels.AddRange(codes[startIndex].labels);
+            nop.blocks.AddRange(codes[startIndex].blocks);
+
+            //If final instruction has exception blocks tied to it add it to the nop
+            if (endIndex != startIndex)
+                nop.blocks.AddRange(codes[endIndex].blocks);
+
+            // Delete IL_129D through IL_1414 inclusive.
+            int removeCount = endIndex - startIndex + 1;
+
+            codes.RemoveRange(startIndex, removeCount);
+
+            // Put the branch-target NOP where IL_129D used to be.
+            codes.Insert(startIndex, nop);
+
+            return codes;
+        }
+    }
     [HarmonyPatch(typeof(PLServer), "IsTalentUnlocked")]
     class ExtendIsTalentUnlocked
     {
@@ -244,6 +376,7 @@ namespace PulsarModLoader.Content.Talents
         }
         public static void PatchSend(PhotonStream stream)
         {
+            if (TalentModManager.Instance.TalentTypes.Count == 0) return;
             // Send extraTalentLockedStatus
             Dictionary<int, ObscuredLong> newDict = TalentModManager.Instance.extraTalentLockedStatus;
             stream.SendNext(newDict.Count);
@@ -296,6 +429,7 @@ namespace PulsarModLoader.Content.Talents
         }
         public static void PatchReceive(PhotonStream stream)
         {
+            if (TalentModManager.Instance.TalentTypes.Count == 0) return;
             // Receive extraTalentLockedStatus
             int count = (int)stream.ReceiveNext();
             var newDict = new Dictionary<int, ObscuredLong>();
