@@ -18,22 +18,7 @@ namespace PulsarModLoader.Content.Components
         protected readonly int _SlotType = 0;
         protected readonly Dictionary<PulsarMod, List<Type>> componentsByMod = new Dictionary<PulsarMod, List<Type>>();
         protected readonly List<Type> components = new List<Type>(64);
-        protected static List<Type> typesAlreadyProcessed = new();
-        protected static bool TypeAlreadyProcessedChildType(List<Type> childTypes, Type t)
-        {
-            if (childTypes.Count == 0)
-            {
-                return false;
-            }
-            foreach (Type type in childTypes)
-            {
-                if (type.IsAssignableFrom(t))
-                {
-                    return true;
-                }
-            }
-            return false;
-        }
+        protected readonly ComponentReflectionConstructor<TComp> componentFactory = new ComponentReflectionConstructor<TComp>();
         protected internal ComponentModManager(int SlotType, int MaxType)
         {
             _SlotType = SlotType;
@@ -43,19 +28,7 @@ namespace PulsarModLoader.Content.Components
 
             ModManager.Instance.OnModUnloaded += HandleModUnLoaded;
 
-            //List<Type> childTypes = new();
-            //foreach (Type t in typesAlreadyProcessed)
-            //{
-            //    if (t is not null && typeof(TComp).IsAssignableFrom(t))
-            //    {
-            //        childTypes.Add(t);
-            //    }
-            //}
-            //typesAlreadyProcessed.Add(typeof(TComp));
-
             Logger.Info($"{this.GetType().Name} loading modded components:");
-
-            //Logger.Info($"Called From: {Environment.StackTrace}");
 
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
@@ -82,7 +55,6 @@ namespace PulsarModLoader.Content.Components
         {
             return typeof(T).IsAssignableFrom(type) && !type.IsInterface && !type.IsAbstract;
         }
-        protected readonly ComponentReflectionConstructor<TComp> componentFactory = new ComponentReflectionConstructor<TComp>();
         protected virtual bool TryCreateComponent(int SubType, int Level, int SubTypeData, out TComp? comp)
         {
             comp = null;

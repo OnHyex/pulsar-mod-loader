@@ -31,7 +31,7 @@ namespace PulsarModLoader.Content.Components
             }
         }
 
-        private readonly Dictionary<string, ConstructorInfoData> ReflectionCache = new();
+        private readonly Dictionary<Type, ConstructorInfoData> ReflectionCache = new();
 
         public void RebuildCache(List<Type> types)
         {
@@ -39,7 +39,7 @@ namespace PulsarModLoader.Content.Components
 
             foreach (Type t in types)
             {
-                if (ReflectionCache.ContainsKey(t.FullName))
+                if (ReflectionCache.ContainsKey(t))
                 {
                     continue;
                 }
@@ -59,7 +59,7 @@ namespace PulsarModLoader.Content.Components
 
                 if (constructor is not null && argumentTypes is not null)
                 {
-                    ReflectionCache[t.FullName] = new ConstructorInfoData(constructor, argumentTypes);
+                    ReflectionCache[t] = new ConstructorInfoData(constructor, argumentTypes);
                 }
                 else
                 {
@@ -151,7 +151,7 @@ namespace PulsarModLoader.Content.Components
         public TComp CreateComponent(Type specificComponentType, int subType, int level, int subTypeData)
         {
             if (!ReflectionCache.TryGetValue(
-                    specificComponentType.FullName,
+                    specificComponentType,
                     out ConstructorInfoData? constructorInfo))
             {
                 throw new Exception(
