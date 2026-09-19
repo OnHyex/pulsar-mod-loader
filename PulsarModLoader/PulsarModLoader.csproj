@@ -4,7 +4,7 @@
     <GenerateDocumentationFile>true</GenerateDocumentationFile>
     <OutputType>Library</OutputType>
     <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
-	<LangVersion>10</LangVersion>
+	<LangVersion>latest</LangVersion>
     <UseWindowsForms>true</UseWindowsForms>
     <ImportWindowsDesktopTargets>true</ImportWindowsDesktopTargets>
   </PropertyGroup>
@@ -36,9 +36,6 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Remove="Chat\Commands\BugReportCommand.cs" />
-  </ItemGroup>
-  <ItemGroup>
-    <Folder Include="Content\Talents\" />
   </ItemGroup>
   <Target Name="CopyMarkdownFiles" AfterTargets="AfterBuild">
     <CreateItem Include="$(SolutionDir)\*.md">
