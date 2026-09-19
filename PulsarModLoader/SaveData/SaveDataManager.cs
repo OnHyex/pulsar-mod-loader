@@ -1,7 +1,9 @@
 ﻿using HarmonyLib;
+using PulsarModLoader.Content.Talents;
 using PulsarModLoader.Patches;
 using PulsarModLoader.Utilities;
 using System;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
@@ -18,6 +20,10 @@ namespace PulsarModLoader.SaveData
             ModManager.Instance.OnModSuccessfullyLoaded += OnModLoaded;
             ModManager.Instance.OnModUnloaded += OnModRemoved;
             Instance = this;
+
+            //Add Talent Mod Manager to SaveData
+            SaveConfigs.Add(new PMLSaveTalents());
+            SaveCount = SaveConfigs.Count;
         }
         public static SaveDataManager Instance;
 
@@ -44,7 +50,7 @@ namespace PulsarModLoader.SaveData
 
         void OnModRemoved(PulsarMod mod)
         {
-            List<PMLSaveData> saveConfigsToRemove = new List<PMLSaveData>();
+            ConcurrentBag<PMLSaveData> saveConfigsToRemove = new();
             SaveConfigs.AsParallel().ForAll((arg) =>
             {
                 if (arg.GetType().Assembly == mod.GetType().Assembly)
@@ -52,9 +58,9 @@ namespace PulsarModLoader.SaveData
                     saveConfigsToRemove.Add(arg);
                 }
             });
-            for (byte s = 0; s < saveConfigsToRemove.Count; s++)
+            while (saveConfigsToRemove.TryTake(out PMLSaveData saveConfigToRemove))
             {
-                SaveConfigs.Remove(saveConfigsToRemove[s]);
+                SaveConfigs.Remove(saveConfigToRemove);
                 SaveCount = SaveConfigs.Count;
             }
         }
