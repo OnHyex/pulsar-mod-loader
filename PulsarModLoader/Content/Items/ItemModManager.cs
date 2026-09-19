@@ -3,6 +3,7 @@ using PulsarModLoader.Utilities;
 using System;
 using System.Collections.Generic;
 using System.Reflection;
+using System.Reflection.Emit;
 
 namespace PulsarModLoader.Content.Items
 {
@@ -11,6 +12,7 @@ namespace PulsarModLoader.Content.Items
         public readonly int VanillaItemMaxType = 0;
         private static ItemModManager m_instance = null;
         public readonly List<ItemMod> ItemTypes = new List<ItemMod>();
+        private readonly Dictionary<PulsarMod, List<ItemMod>> itemsByMod = new Dictionary<PulsarMod, List<ItemMod>>();
         public static ItemModManager Instance
         {
             get
@@ -26,6 +28,9 @@ namespace PulsarModLoader.Content.Items
         {
             VanillaItemMaxType = Enum.GetValues(typeof(EPawnItemType)).Length;
             Logger.Info($"ItemMaxTypeint = {VanillaItemMaxType - 1}");
+
+            ModManager.Instance.OnModUnloaded += OnModUnLoaded;
+
             foreach (PulsarMod mod in ModManager.Instance.GetAllMods())
             {
                 Assembly asm = mod.GetType().Assembly;
@@ -39,6 +44,14 @@ namespace PulsarModLoader.Content.Items
                         GetItemIDsFromName(ItemModHandler.Name, out int MainType, out int SubType);
                         if (MainType == -1)
                         {
+                            if (itemsByMod.ContainsKey(mod))
+                            {
+                                itemsByMod[mod].Add(ItemModHandler);
+                            }
+                            else
+                            {
+                                itemsByMod[mod] = new List<ItemMod>() { ItemModHandler };
+                            }
                             ItemTypes.Add(ItemModHandler);
                             GetItemIDsFromName(ItemModHandler.Name, out MainType, out SubType);
                             Logger.Info($"Added Item: '{ItemModHandler.Name}' with MainTypeID '{MainType}' and SubTypeID {SubType}");
@@ -49,6 +62,18 @@ namespace PulsarModLoader.Content.Items
                         }
                     }
                 }
+            }
+        }
+        internal void OnModUnLoaded(PulsarMod mod)
+        {
+            if (mod is not null && itemsByMod.ContainsKey(mod))
+            {
+                List<ItemMod> types = itemsByMod[mod];
+                foreach (ItemMod item in types)
+                {
+                    ItemTypes.Remove(item);
+                }
+                itemsByMod.Remove(mod);
             }
         }
         /// <summary>
@@ -108,7 +133,6 @@ namespace PulsarModLoader.Content.Items
                     InItem = ItemType.PLPawnItem;
                     InItem.Level = level;
                     InItem.SubType = 64 + ((Maintype - Instance.VanillaItemMaxType) * 64) + Subtype;
-                    Logger.Info($"CreatePawnItem gave item subtype {InItem.SubType}");
                 }
             }
             if (InItem == null)
@@ -197,11 +221,10 @@ namespace PulsarModLoader.Content.Items
             return false;
         }
     }
-
-    [HarmonyPatch(typeof(PLPawnInventoryBase), "UpdateItem")]
-    class UpdateItemPatch
+    [HarmonyPatch]
+    class BaseGameItemSpawningFixes
     {
-        static bool Prefix(PLPawnInventoryBase __instance, int inNetID, int inType, int inSubType, int inLevel, int inEquipID)
+        static void UpdateItemMethod(PLPawnInventoryBase __instance, int inNetID, int inType, int inSubType, int inLevel, int inEquipID)
         {
             PLPawnItem itemAtNetID = __instance.GetItemAtNetID(inNetID);
             if (itemAtNetID != null)
@@ -212,23 +235,51 @@ namespace PulsarModLoader.Content.Items
             }
             else
             {
-                PLPawnItem plpawnItem = ItemModManager.CreatePawnItem(inType, inSubType, inLevel);
-                if (plpawnItem != null)
+                itemAtNetID = ItemModManager.CreatePawnItem(inType, inSubType, inLevel);
+                if (itemAtNetID != null)
                 {
-                    plpawnItem.NetID = inNetID;
-                    plpawnItem.EquipID = inEquipID;
-                    __instance.AddItem_Internal(inNetID, plpawnItem);
+                    itemAtNetID.NetID = inNetID;
+                    itemAtNetID.EquipID = inEquipID;
+                    __instance.AddItem_Internal(inNetID, itemAtNetID);
                 }
             }
             if (PLNetworkManager.Instance.IsInternalBuild)
             {
-                Logger.Info("UpdateItem:    player: " + ((__instance.PlayerOwner != null) ? __instance.PlayerOwner.GetPlayerName(false) : "null") + "    equipID: " + inEquipID.ToString());
+                Logger.Info("UpdateItem:" + itemAtNetID?.Name + "player: " + ((__instance.PlayerOwner != null) ? __instance.PlayerOwner.GetPlayerName(false) : "null") + "    equipID: " + inEquipID.ToString());
             }
             if (PLTabMenu.Instance != null)
             {
                 PLTabMenu.Instance.ShouldRecreateLocalInventory = true;
             }
-            return false;
         }
+        [HarmonyPatch(typeof(PLPawnInventoryBase), "UpdateItem")]
+        class UpdateItemPatch
+        {
+            static bool Prefix(PLPawnInventoryBase __instance, int inNetID, int inType, int inSubType, int inLevel, int inEquipID)
+            {
+                UpdateItemMethod(__instance, inNetID, inType, inSubType, inLevel, inEquipID); ;
+                return false;
+            }
+        }
+        [HarmonyPatch(typeof(PLPlayer), nameof(PLPlayer.AttemptToPickupDroppedPlayerPawnItem))]
+        class PickUpDroppedItemPatch //Patching call sites as UpdateItem is currently being inlined into this method
+        {
+            static IEnumerable<CodeInstruction> Transpiler(IEnumerable<CodeInstruction> instructions)
+            {
+                foreach (var instruction in instructions)
+                {
+                    if (instruction.opcode == OpCodes.Callvirt && (MethodInfo)instruction.operand == AccessTools.Method(typeof(PLPawnInventoryBase), nameof(PLPawnInventoryBase.UpdateItem)))
+                    {
+                        instruction.opcode = OpCodes.Call;
+                        instruction.operand = AccessTools.Method(typeof(BaseGameItemSpawningFixes), nameof(BaseGameItemSpawningFixes.UpdateItemMethod));
+                    }
+                    yield return instruction;
+                }
+            }
+        }
+
     }
+    
+
+
 }
