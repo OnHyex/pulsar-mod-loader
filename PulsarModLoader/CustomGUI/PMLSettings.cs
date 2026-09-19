@@ -35,6 +35,8 @@ namespace PulsarModLoader.CustomGUI
                 }
             }
 
+            PMLConfig.HideResearchableTalentsFromTab.Value = GUILayout.Toggle(PMLConfig.HideResearchableTalentsFromTab.Value, "Hide Non-Researched Talents from Tab Menu");
+
             GUI.skin.label.alignment = TextAnchor.UpperLeft;
             BeginHorizontal();
             {

@@ -14,6 +14,7 @@ namespace PulsarModLoader
 
         public static SaveValue<bool> ZipModLoad = new SaveValue<bool>("ZipModLoad", true);
         public static SaveValue<bool> ZipModMode = new SaveValue<bool>("ZipModMode", false);
+        public static SaveValue<bool> HideResearchableTalentsFromTab = new SaveValue<bool>("HideResearchableTalentsFromTab", false);
 
         public static uint DefaultMaxLoadSizeBytes = 10485760;
         public static SaveValue<uint> MaxLoadSizeBytes = new SaveValue<uint>("MaxLoadSizeBytes", DefaultMaxLoadSizeBytes);
